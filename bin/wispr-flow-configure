@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/Wispr Flow"
+config_file="$config_dir/config.json"
+
+die() {
+	printf 'ERROR: %s\n' "$*" >&2
+	exit 1
+}
+
+have_jq() {
+	command -v jq >/dev/null 2>&1 || die "Falta 'jq'."
+}
+
+rewrite_config() {
+	local hide_bar="$1"
+	have_jq
+	mkdir -p "$config_dir"
+	umask 077
+	local tmp
+	tmp="$(mktemp "$config_dir/config.json.XXXXXX")"
+	if [[ -f $config_file ]]; then
+		jq --arg hide "$hide_bar" '
+			.prefs = (.prefs // {}) |
+			.prefs.cache = (.prefs.cache // {}) |
+			.prefs.user = (.prefs.user // {}) |
+			.prefs.user.shortcuts = (
+				((.prefs.user.shortcuts // {}) | with_entries(select(.value != "ptt")))
+				+ {"162+91": "ptt"}
+			) |
+			.prefs.cache.splitKeybinds = (
+				((.prefs.cache.splitKeybinds // []) | map(select(.value != "ptt")))
+				+ [{"shortcut": [162, 91], "value": "ptt"}]
+			) |
+			.prefs.user.modifierShortcut = "164" |
+			if $hide == "true" then .prefs.user.hideFlowBarPermanently = true else . end
+		' "$config_file" > "$tmp"
+	else
+		jq -n --arg hide "$hide_bar" '
+			{
+				prefs: {
+					cache: {splitKeybinds: [{shortcut: [162, 91], value: "ptt"}]},
+					user: {
+						shortcuts: {"162+91": "ptt"},
+						modifierShortcut: "164",
+						hideFlowBarPermanently: ($hide == "true"),
+						openAtLogin: false
+					}
+				}
+			}
+		' > "$tmp"
+	fi
+	mv "$tmp" "$config_file"
+	chmod 0600 "$config_file"
+}
+
+case "${1:-}" in
+	bootstrap)
+		hide=false
+		[[ ${2:-} == --hide-flow-bar ]] && hide=true
+		rewrite_config "$hide"
+		printf 'Atajo PTT Linux configurado: Ctrl+Super\n'
+		if $hide; then
+			printf 'Flow Bar oculta para evitar la superficie transparente de Hyprland.\n'
+		fi
+		;;
+	fix-shortcut)
+		rewrite_config false
+		printf 'Atajo PTT reparado: Ctrl+Super. Reinicia Wispr Flow.\n'
+		;;
+	flow-bar)
+		have_jq
+		[[ -f $config_file ]] || die 'Ejecuta Wispr Flow una vez antes de cambiar Flow Bar.'
+		case "${2:-}" in
+			on) value=false ;;
+			off) value=true ;;
+			*) die 'Uso: wispr-flow --flow-bar on|off' ;;
+		esac
+		tmp="$(mktemp "$config_dir/config.json.XXXXXX")"
+		jq --argjson value "$value" \
+			'.prefs.user.hideFlowBarPermanently = $value' "$config_file" > "$tmp"
+		mv "$tmp" "$config_file"
+		chmod 0600 "$config_file"
+		printf 'Flow Bar: %s. Reinicia Wispr Flow.\n' "${2}"
+		;;
+	check)
+		have_jq
+		if [[ -f $config_file ]] \
+			&& jq -e '.prefs.user.shortcuts["162+91"] == "ptt"' "$config_file" >/dev/null; then
+			printf '[PASS] Atajo PTT Linux: Ctrl+Super\n'
+		else
+			printf '[FAIL] Atajo PTT no es valido para Linux; ejecuta wispr-flow --fix-shortcut\n'
+			exit 1
+		fi
+		;;
+	*)
+		printf 'Uso: wispr-flow-configure bootstrap|fix-shortcut|flow-bar on|off|check\n' >&2
+		exit 2
+		;;
+esac

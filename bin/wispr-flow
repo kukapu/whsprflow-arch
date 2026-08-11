@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+set -uo pipefail
+
+# WISPR_FLOW_ARCH_WRAPPER=1
+user_root="${WISPR_FLOW_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/whsprflow-arch/app}"
+if [[ -x /opt/wispr-flow/usr/lib/wispr-flow/wispr-flow ]]; then
+	install_root='/opt/wispr-flow'
+	package_type='system'
+else
+	install_root="$user_root"
+	package_type='appimage'
+fi
+
+app_dir="$install_root/usr/lib/wispr-flow"
+electron_bin="$app_dir/wispr-flow"
+helper_bin="$app_dir/resources/Release/wispr-flow-linux-helper"
+configurer="$(dirname "$(readlink -f "$0")")/wispr-flow-configure"
+
+if [[ ! -x $electron_bin ]]; then
+	printf 'ERROR: Wispr Flow no esta instalado en %s\n' "$install_root" >&2
+	exit 1
+fi
+
+# shellcheck source=/dev/null
+source "$app_dir/launcher-common.sh"
+
+case "${1:-}" in
+	--fix-shortcut)
+		exec "$configurer" fix-shortcut
+		;;
+	--flow-bar)
+		[[ $# -eq 2 ]] || { printf 'Uso: wispr-flow --flow-bar on|off\n' >&2; exit 2; }
+		exec "$configurer" flow-bar "$2"
+		;;
+	--logs)
+		exec "${PAGER:-less}" "${XDG_CACHE_HOME:-$HOME/.cache}/wispr-flow/launcher.log"
+		;;
+	--doctor)
+		# User installs cannot carry a setuid sandbox, matching AppImage behavior.
+		[[ $package_type == appimage ]] && export APPIMAGE="$install_root/Wispr-Flow.AppImage"
+		rc=0
+		run_doctor "$helper_bin" "$electron_bin" || rc=$?
+		printf '\nIntegracion whsprflow-arch\n'
+		if command -v xdg-mime >/dev/null 2>&1 \
+			&& [[ $(xdg-mime query default x-scheme-handler/wispr-flow 2>/dev/null) == wispr-flow.desktop ]]; then
+			printf '[PASS] Callback de login wispr-flow: registrado\n'
+		else
+			printf '[FAIL] Callback de login wispr-flow: no registrado\n'
+			rc=1
+		fi
+		"$configurer" check || rc=1
+		exit "$rc"
+		;;
+esac
+
+setup_logging || exit 1
+setup_electron_env
+cleanup_stale_lock
+detect_display_backend
+
+log_message '--- whsprflow-arch wrapper start ---'
+log_session_env
+
+if ! check_display; then
+	printf 'ERROR: Wispr Flow necesita una sesion grafica.\n' >&2
+	exit 1
+fi
+
+build_electron_args "$package_type"
+
+# Electron 42 cannot make the transparent Flow Bar click-through on native
+# Wayland. Hyprland therefore gets an XWayland UI by default, while the helper
+# keeps WAYLAND_DISPLAY and still uses uinput, wl-clipboard and AT-SPI.
+desktop="${XDG_CURRENT_DESKTOP:-}"
+if [[ -n ${WAYLAND_DISPLAY:-} && ${desktop,,} == *hyprland* \
+		&& ${WISPR_FLOW_NATIVE_WAYLAND:-0} != 1 ]]; then
+	electron_args+=('--ozone-platform=x11')
+	log_message 'Hyprland: forcing XWayland UI; Linux helper remains on Wayland'
+fi
+
+cd "$HOME" || exit 1
+exec "$electron_bin" "${electron_args[@]}" "$@" >> "$log_file" 2>&1
