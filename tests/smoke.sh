@@ -8,9 +8,136 @@ trap 'rm -rf "$tmp"' EXIT
 
 for script in "$root/install.sh" "$root/uninstall.sh" "$root/bin/wispr-flow" \
 	"$root/bin/wispr-flow-configure" "$root/patches/linux-runtime-fixes.sh" \
-	"$root/scripts/build-helper.sh"; do
+	"$root/scripts/assemble-app.sh" "$root/scripts/build-helper.sh"; do
 	bash -n "$script"
 done
+
+aur_dir="$root/packaging/aur"
+pkgbuild="$aur_dir/PKGBUILD"
+bash -n "$pkgbuild"
+bash -n "$aur_dir/wispr-flow-hyprland.install"
+
+placeholder='TO_BE_''PINNED'
+bash -c '
+	set -Eeuo pipefail
+	source "$1"
+	placeholder="$2"
+	[[ $pkgname == wispr-flow-hyprland ]]
+	[[ $pkgver == 1.6.447 && $pkgrel == 1 ]]
+	[[ ${arch[*]} == x86_64 ]]
+	[[ $url == https://github.com/kukapu/whsprflow-arch ]]
+	[[ ${license[*]} == "0BSD AND BSD-3-Clause AND LicenseRef-Proprietary AND MIT AND Unlicense" ]]
+	[[ ${provides[*]} == "wispr-flow=1.6.447" ]]
+	[[ ${conflicts[*]} == wispr-flow ]]
+	[[ -z ${replaces+x} ]]
+	[[ ${options[*]} == !strip ]]
+	[[ $install == wispr-flow-hyprland.install ]]
+	[[ $_support_commit == "$placeholder" ]]
+	[[ ${sha256sums[0]} == "$placeholder" ]]
+	[[ ${#source[@]} -eq ${#sha256sums[@]} ]]
+	[[ ${noextract[*]} == "WisprFlow-1.6.447-full.nupkg electron-v42.3.0-linux-x64.zip" ]]
+	for dependency in hicolor-icon-theme hyprland libcups libgcc libstdc++ pango; do
+		[[ " ${depends[*]} " == *" $dependency "* ]]
+	done
+	for dependency in asar nodejs perl python unzip; do
+		[[ " ${makedepends[*]} " == *" $dependency "* ]]
+	done
+	[[ ${optdepends[*]} == uwsm:* ]]
+' _ "$pkgbuild" "$placeholder"
+
+pkg_functions="$(bash -c 'source "$1"; declare -f build package' _ "$pkgbuild")"
+if grep -Eiq '(^|[^[:alnum:]_])(sudo|pacman|curl|wget)([^[:alnum:]_]|$)|git[[:space:]]+clone|/usr/local|/home/|\$\{?HOME' \
+		<<< "$pkg_functions"; then
+	printf 'ERROR: build/package contiene una operacion prohibida.\n' >&2
+	exit 1
+fi
+grep -qF -- '--asar-bin /usr/bin/asar' <<< "$pkg_functions"
+grep -qF '"$srcdir/' <<< "$pkg_functions"
+! grep -qF '/opt/' <<< "$(bash -c 'source "$1"; declare -f build' _ "$pkgbuild")"
+! grep -qF '/usr/local' "$pkgbuild"
+! grep -qF '/home/' "$pkgbuild"
+[[ ! -e $aur_dir/.SRCINFO ]]
+
+mapfile -t placeholder_hits < <(
+	grep -R -I -n --exclude-dir=.git --exclude='wispr-flow-linux-helper-x86_64' \
+		-- "$placeholder" "$root"
+)
+[[ ${#placeholder_hits[@]} -eq 2 ]]
+[[ ${placeholder_hits[0]} == "$pkgbuild:"* ]]
+[[ ${placeholder_hits[1]} == "$pkgbuild:"* ]]
+
+sha256sum "$aur_dir/wispr-flow.desktop" \
+	| grep -q '^3b65d10698a9c944c5494cfd9a5fa3f04dd7b5a02f8fce0ace9333b6f1646ba5 '
+sha256sum "$aur_dir/70-wispr-flow-input.rules" \
+	| grep -q '^3d7d9cab9b2af22cfd60b0dd965ff1b0f6e315e03c203add9f9646ae320bb97d '
+
+if command -v desktop-file-validate >/dev/null 2>&1; then
+	desktop-file-validate "$aur_dir/wispr-flow.desktop"
+fi
+
+if command -v makepkg >/dev/null 2>&1; then
+	srcinfo="$(cd "$aur_dir" && makepkg --printsrcinfo)"
+	grep -qxF 'pkgbase = wispr-flow-hyprland' <<< "$srcinfo"
+	grep -qxF 'pkgname = wispr-flow-hyprland' <<< "$srcinfo"
+	grep -qxF $'\tprovides = wispr-flow=1.6.447' <<< "$srcinfo"
+	grep -qxF $'\tconflicts = wispr-flow' <<< "$srcinfo"
+	! grep -q 'replaces = ' <<< "$srcinfo"
+fi
+
+python3 - "$root/REUSE.toml" "$aur_dir/REUSE.toml" <<'PY'
+import pathlib
+import sys
+import tomllib
+
+for value in sys.argv[1:]:
+    data = tomllib.loads(pathlib.Path(value).read_text())
+    assert data["version"] == 1
+    assert data["annotations"]
+PY
+cmp "$root/LICENSE" "$root/LICENSES/0BSD.txt"
+cmp "$root/LICENSE" "$aur_dir/LICENSE"
+cmp "$root/LICENSE" "$aur_dir/LICENSES/0BSD.txt"
+cmp "$root/assets/UNLICENSE" "$root/LICENSES/Unlicense.txt"
+
+assembler="$root/scripts/assemble-app.sh"
+[[ -x $assembler ]]
+assembler_help="$($assembler --help)"
+for flag in --version --nupkg --electron-zip --sqlite --helper --port-dir \
+	--output-dir --asar-bin; do
+	grep -q -- "$flag" <<< "$assembler_help"
+done
+grep -qF 'por defecto: asar' <<< "$assembler_help"
+
+assembler_home="$tmp/assembler-home"
+if HOME="$assembler_home" "$assembler" >/dev/null 2>&1; then
+	printf 'ERROR: el ensamblador debe rechazar flags requeridos ausentes.\n' >&2
+	exit 1
+fi
+[[ ! -e $assembler_home ]]
+if "$assembler" --version >/dev/null 2>&1; then
+	printf 'ERROR: un flag del ensamblador sin valor debe fallar.\n' >&2
+	exit 1
+fi
+
+mkdir "$tmp/existing-runtime"
+if "$assembler" \
+		--version 1.0.0 \
+		--nupkg /dev/null \
+		--electron-zip /dev/null \
+		--sqlite /dev/null \
+		--helper /dev/null \
+		--port-dir "$tmp" \
+		--output-dir "$tmp/existing-runtime" \
+		--asar-bin /bin/true >"$tmp/assembler.out" 2>"$tmp/assembler.err"; then
+	printf 'ERROR: el ensamblador debe rechazar un output existente.\n' >&2
+	exit 1
+fi
+grep -qF 'directorio de salida ya existe' "$tmp/assembler.err"
+! grep -qF 'pnpm dlx' "$assembler"
+grep -qF 'scripts/assemble-app.sh' "$root/install.sh"
+grep -qF -- '--asar-bin /usr/bin/asar' "$root/install.sh"
+grep -qF '/opt/wispr-flow-hyprland/usr/lib/wispr-flow/wispr-flow' \
+	"$root/bin/wispr-flow"
 
 sha256sum "$root/patches/helper/uinput.rs" \
 	| grep -q '^e0ac469f0d3c6227802d7beb364b16b3b52f12b6838df35bae7e9950ab5cc919 '
@@ -168,6 +295,54 @@ case "$1" in
 esac
 EOF
 chmod +x "$tmp/fake-bin/hyprctl"
+
+cat > "$tmp/fake-bin/xdg-mime" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+case "${1:-}" in
+	default)
+		[[ $# -eq 3 ]]
+		[[ $2 == wispr-flow.desktop ]]
+		[[ $3 == x-scheme-handler/wispr-flow ]]
+		printf '%s\n' "$2" > "${WISPR_TEST_XDG_DIR:?}/default"
+		;;
+	query)
+		[[ ${2:-} == default ]]
+		[[ ${3:-} == x-scheme-handler/wispr-flow ]]
+		[[ -f ${WISPR_TEST_XDG_DIR:?}/default ]] && cat "$WISPR_TEST_XDG_DIR/default"
+		;;
+	*) exit 2 ;;
+esac
+EOF
+cat > "$tmp/fake-bin/sudo" <<'EOF'
+#!/usr/bin/env bash
+printf 'sudo called\n' > "${WISPR_TEST_XDG_DIR:?}/sudo-called"
+exit 99
+EOF
+chmod +x "$tmp/fake-bin/xdg-mime" "$tmp/fake-bin/sudo"
+
+mkdir -p "$tmp/xdg-state"
+printf '# setup Hyprland config\n' > "$tmp/config/hypr/hyprland.conf"
+PATH="$tmp/fake-bin:$PATH" HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	XDG_CURRENT_DESKTOP=Hyprland HYPRLAND_INSTANCE_SIGNATURE=test \
+	WISPR_FLOW_INSTALL_ROOT="$tmp/app" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	WISPR_TEST_XDG_DIR="$tmp/xdg-state" \
+	"$root/bin/wispr-flow" --setup
+jq -e '.prefs.user.hideFlowBarPermanently == true' "$config" >/dev/null
+grep -qxF 'wispr-flow.desktop' "$tmp/xdg-state/default"
+grep -qxF '# >>> whsprflow-arch rules >>>' "$tmp/config/hypr/hyprland.conf"
+[[ ! -e $tmp/xdg-state/sudo-called ]]
+
+mkdir -p "$tmp/gnome-config" "$tmp/gnome-home" "$tmp/gnome-xdg-state"
+PATH="$tmp/fake-bin:$PATH" HOME="$tmp/gnome-home" \
+	XDG_CONFIG_HOME="$tmp/gnome-config" XDG_CURRENT_DESKTOP=GNOME \
+	HYPRLAND_INSTANCE_SIGNATURE= WISPR_FLOW_INSTALL_ROOT="$tmp/app" \
+	WISPR_TEST_XDG_DIR="$tmp/gnome-xdg-state" \
+	"$root/bin/wispr-flow" --setup
+jq -e '.prefs.user.hideFlowBarPermanently == false' \
+	"$tmp/gnome-config/Wispr Flow/config.json" >/dev/null
+[[ ! -e $tmp/gnome-config/hypr/wispr-flow.conf ]]
+[[ ! -e $tmp/gnome-xdg-state/sudo-called ]]
 
 printf '# offline Hyprland config\n' > "$tmp/config/hypr/hyprland.conf"
 PATH="$tmp/fake-bin:$PATH" HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \

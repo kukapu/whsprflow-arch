@@ -4,3 +4,10 @@
 *.log
 core
 core.*
+/packaging/aur/pkg/
+/packaging/aur/src/
+/packaging/aur/*.node
+/packaging/aur/*.nupkg
+/packaging/aur/*.pkg.tar.*
+/packaging/aur/*.tar.gz
+/packaging/aur/*.zip

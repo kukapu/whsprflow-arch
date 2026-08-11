@@ -7,6 +7,9 @@ user_root="${WISPR_FLOW_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/whspr
 if [[ -n ${WISPR_FLOW_INSTALL_ROOT:-} ]]; then
 	install_root="$WISPR_FLOW_INSTALL_ROOT"
 	package_type='appimage'
+elif [[ -x /opt/wispr-flow-hyprland/usr/lib/wispr-flow/wispr-flow ]]; then
+	install_root='/opt/wispr-flow-hyprland'
+	package_type='system'
 elif [[ -x /opt/wispr-flow/usr/lib/wispr-flow/wispr-flow ]]; then
 	install_root='/opt/wispr-flow'
 	package_type='system'
@@ -226,7 +229,62 @@ hide_hub() {
 	printf 'Flow Hub oculto; Electron y el helper siguen activos.\n'
 }
 
+is_hyprland_session() {
+	local desktop="${XDG_CURRENT_DESKTOP:-}"
+	[[ ${desktop,,} == *hyprland* \
+		|| -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]
+}
+
+setup_wispr() {
+	if ((EUID == 0)); then
+		printf 'ERROR: ejecuta wispr-flow --setup como tu usuario de escritorio, no como root.\n' >&2
+		return 1
+	fi
+
+	local -a bootstrap_args=(bootstrap)
+	if is_hyprland_session; then
+		bootstrap_args+=(--hide-flow-bar)
+	fi
+	"$configurer" "${bootstrap_args[@]}" || return 1
+
+	if command -v xdg-mime >/dev/null 2>&1; then
+		xdg-mime default wispr-flow.desktop x-scheme-handler/wispr-flow || {
+			printf 'ERROR: no se pudo registrar el callback wispr-flow:.\n' >&2
+			return 1
+		}
+		if [[ $(xdg-mime query default x-scheme-handler/wispr-flow 2>/dev/null) \
+				!= wispr-flow.desktop ]]; then
+			printf 'ERROR: xdg-mime no confirmo el callback wispr-flow:.\n' >&2
+			return 1
+		fi
+		printf 'Callback wispr-flow: registrado para este usuario.\n'
+	else
+		printf 'AVISO: xdg-mime no esta disponible; registra manualmente x-scheme-handler/wispr-flow.\n' >&2
+	fi
+
+	if is_hyprland_session; then
+		"$configurer" hyprland-rules on || return 1
+	else
+		printf 'Reglas de Hyprland omitidas: la sesion actual no es Hyprland.\n'
+	fi
+
+	cat <<'EOF'
+
+Configuracion inicial terminada.
+Siguientes pasos:
+  1. Ejecuta: wispr-flow --doctor
+  2. Si falla el acceso a /dev/uinput o /dev/input, reinicia el equipo.
+  3. Inicia Wispr Flow, completa el login y prueba Ctrl+Shift para dictar.
+  4. Opcional en Hyprland/UWSM: wispr-flow --autostart on
+EOF
+}
+
 case "${1:-}" in
+	--setup)
+		[[ $# -eq 1 ]] || { printf 'Uso: wispr-flow --setup\n' >&2; exit 2; }
+		setup_wispr
+		exit $?
+		;;
 	--fix-shortcut)
 		exec "$configurer" fix-shortcut
 		;;

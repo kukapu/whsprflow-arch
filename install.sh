@@ -130,13 +130,15 @@ fi
 if $system_setup; then
 	info 'Instalando dependencias de Arch'
 	sudo pacman -S --needed \
-		acl alsa-lib at-spi2-core curl desktop-file-utils git gtk3 jq libpulse \
-		libsecret nodejs nss perl pnpm python unzip wl-clipboard xdg-utils xorg-xwayland
+		acl alsa-lib asar at-spi2-core curl desktop-file-utils git gtk3 jq libpulse \
+		libsecret nodejs nss perl python unzip wl-clipboard xdg-utils xorg-xwayland
 fi
 
-for cmd in curl file git jq node perl pnpm python3 sha256sum unzip xdg-mime; do
+for cmd in asar curl file git jq node perl python3 sha256sum unzip xdg-mime; do
 	have "$cmd" || die "Falta '$cmd'. Instala las dependencias o no uses --no-system-setup."
 done
+[[ -x /usr/bin/asar ]] \
+	|| die "Falta '/usr/bin/asar'. Instala el paquete Arch 'asar'."
 
 mkdir -p "$cache_dir"
 work_dir="$(mktemp -d "$cache_dir/build.XXXXXX")"
@@ -158,103 +160,25 @@ file "$helper_bin" | grep -q 'ELF 64-bit.*x86-64' \
 	|| die 'El helper incluido no es un ELF Linux x86_64.'
 printf 'Verificado %s (commit %s, SHA-256 correcto)\n' "$HELPER_NAME" "$HELPER_COMMIT"
 
-info 'Extrayendo el cliente oficial y Electron Linux'
-mkdir -p "$work_dir/nupkg" "$work_dir/app" "$work_dir/stage/usr/lib/wispr-flow"
-unzip -q "$nupkg" -d "$work_dir/nupkg"
-unzip -q "$electron_zip" -d "$work_dir/stage/usr/lib/wispr-flow"
-
-resources_src="$work_dir/nupkg/lib/net45/resources"
-[[ -f $resources_src/app.asar ]] || die 'El NUPKG no contiene resources/app.asar.'
-
 info 'Obteniendo el port Linux fijado por commit'
 git clone --quiet --no-checkout https://github.com/wispr-flow-linux/wispr-flow-linux.git "$work_dir/port"
 git -C "$work_dir/port" checkout --quiet "$PORT_COMMIT"
 [[ $(git -C "$work_dir/port" rev-parse HEAD) == "$PORT_COMMIT" ]] \
 	|| die 'El checkout del port no coincide con el commit fijado.'
 
-info 'Desempaquetando y adaptando el cliente a Linux'
-pnpm dlx @electron/asar@4.0.1 extract "$resources_src/app.asar" "$work_dir/app"
+info 'Ensamblando el runtime Linux aislado'
+"$script_dir/scripts/assemble-app.sh" \
+	--version "$APP_VERSION" \
+	--nupkg "$nupkg" \
+	--electron-zip "$electron_zip" \
+	--sqlite "$sqlite_bin" \
+	--helper "$helper_bin" \
+	--port-dir "$work_dir/port" \
+	--output-dir "$work_dir/runtime" \
+	--asar-bin /usr/bin/asar
 
-actual_version="$(node -e 'process.stdout.write(require(process.argv[1]).version)' "$work_dir/app/package.json")"
-[[ $actual_version == "$APP_VERSION" ]] \
-	|| die "Version inesperada dentro de app.asar: $actual_version"
-
-main_bundle="$work_dir/app/.webpack/main/index.js"
-patch_dir="$work_dir/port/scripts/patches"
-bash "$patch_dir/helper-resolver.sh" "$main_bundle"
-bash "$patch_dir/helper-env.sh" "$main_bundle"
-bash "$patch_dir/mac-gates.sh" "$main_bundle"
-bash "$patch_dir/linux-window-frame.sh" "$main_bundle"
-bash "$patch_dir/linux-deeplink.sh" "$main_bundle"
-bash "$patch_dir/linux-renderer-chrome.sh" "$work_dir/app/.webpack/renderer/hub/index.js"
-
-renderer_count=0
-for renderer in "$work_dir"/app/.webpack/renderer/*/index.js; do
-	[[ -f $renderer ]] || continue
-	grep -qF 'platform?.isWindows' "$renderer" || continue
-	bash "$patch_dir/linux-renderer-treat-as-windows.sh" "$renderer"
-	renderer_count=$((renderer_count + 1))
-done
-((renderer_count > 0)) || die 'No se adapto ningun renderer a Linux.'
-
-# The upstream cold-start patch does not cover callbacks delivered to an already
-# running process. The singleton must also exit synchronously so its ready
-# listeners cannot start SQLite and the helper before app.quit() takes effect.
-perl -0777 -pi -e '
-	$n += s/(e\.app\.on\("second-instance".{0,700}?else\{)if\([\w\x24]\.[\w\x24]{2}\)(\{const [\w\x24]+=[\w\x24]+\(r\.find\(e=>e\.startsWith\("wispr-flow:)/${1}if(true)${2}/s;
-	$m += s/(title:"Flow Hub".{0,700}?)focusable:!1/${1}focusable:!0/s;
-	$q += s/(App is already running, quitting"\),void e\.app\.)quit\(\)/${1}exit()/;
-	END { die "expected one warm-deeplink, hub-focus, and singleton-exit patch; got deeplink=$n focus=$m singleton=$q\n" unless $n == 1 && $m == 1 && $q == 1 }
-' "$main_bundle"
-
-bash "$script_dir/patches/linux-runtime-fixes.sh" "$main_bundle"
-
-# Remove patch backups before repacking. dotglob is required to traverse .webpack.
-shopt -s globstar nullglob dotglob
-rm -f "$work_dir"/app/**/*.orig
-
-native_dir="$work_dir/app/.webpack/main/native_modules/build/Release"
-mkdir -p "$native_dir"
-install -m 0755 "$sqlite_bin" "$native_dir/node_sqlite3.node"
-[[ $(od -An -N4 -tx1 "$native_dir/node_sqlite3.node" | tr -d ' \n') == 7f454c46 ]] \
-	|| die 'El modulo SQLite descargado no es un ELF Linux.'
-
-node --check "$main_bundle"
-for renderer in "$work_dir"/app/.webpack/renderer/*/index.js; do
-	[[ -f $renderer ]] && node --check "$renderer"
-done
-
-resources_dst="$work_dir/stage/usr/lib/wispr-flow/resources"
-mkdir -p "$resources_dst/Release"
-cp -a "$resources_src/assets" "$resources_dst/assets"
-cp -a "$resources_src/migrations" "$resources_dst/migrations"
-for extra in ax-inspect-lib.mjs ax-inspect-server.mjs ax-inspect.mjs; do
-	[[ -f $resources_src/$extra ]] && cp "$resources_src/$extra" "$resources_dst/$extra"
-done
-
-rm -f "$work_dir/app/.webpack/main/native_modules/lib"/crypt32-*.node
-pnpm dlx @electron/asar@4.0.1 pack "$work_dir/app" "$resources_dst/app.asar" --unpack '*.node'
-install -m 0755 "$sqlite_bin" \
-	"$resources_dst/app.asar.unpacked/.webpack/main/native_modules/build/Release/node_sqlite3.node"
-pnpm dlx @electron/asar@4.0.1 list "$resources_dst/app.asar" > "$work_dir/asar-files.txt"
-if grep -q 'crypt32-' "$work_dir/asar-files.txt"; then
-	die 'El ASAR final todavia referencia modulos crypt32 exclusivos de Windows.'
-fi
-if grep -q '\.orig$' "$work_dir/asar-files.txt"; then
-	die 'El ASAR final todavia contiene backups de los parches.'
-fi
-install -m 0755 "$helper_bin" "$resources_dst/Release/wispr-flow-linux-helper"
-install -m 0644 "$script_dir/assets/UNLICENSE" "$resources_dst/Release/helper.UNLICENSE"
-
-bash "$work_dir/port/scripts/verify-patches.sh" "$resources_dst/app.asar"
-
-mv "$work_dir/stage/usr/lib/wispr-flow/electron" "$work_dir/stage/usr/lib/wispr-flow/wispr-flow"
-chmod 0755 "$work_dir/stage/usr/lib/wispr-flow/wispr-flow"
-install -m 0644 "$work_dir/port/scripts/launcher-common.sh" \
-	"$work_dir/stage/usr/lib/wispr-flow/launcher-common.sh"
-install -m 0644 "$work_dir/port/scripts/doctor.sh" \
-	"$work_dir/stage/usr/lib/wispr-flow/doctor.sh"
-printf '%s\n' "$APP_VERSION" > "$work_dir/stage/usr/lib/wispr-flow/app-version"
+mkdir -p "$work_dir/stage/usr/lib"
+mv "$work_dir/runtime" "$work_dir/stage/usr/lib/wispr-flow"
 printf '%s\n' "$INSTALL_MARKER_VALUE" > "$work_dir/stage/$INSTALL_MARKER"
 
 if $system_install; then
@@ -294,7 +218,9 @@ applications_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 icons_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
 config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
 mkdir -p "$applications_dir" "$icons_dir" "$config_home"
-install -m 0644 "$resources_src/assets/logos/flow-symbol.svg" "$icons_dir/wispr-flow.svg"
+install -m 0644 \
+	"$work_dir/stage/usr/lib/wispr-flow/resources/assets/logos/flow-symbol.svg" \
+	"$icons_dir/wispr-flow.svg"
 
 desktop_file="$applications_dir/wispr-flow.desktop"
 cat > "$desktop_file" <<EOF

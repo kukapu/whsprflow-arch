@@ -9,10 +9,51 @@ El repositorio no redistribuye el cliente propietario. `install.sh` lo descarga
 del CDN oficial y exige su SHA-256. El unico binario incluido es el helper Linux
 abierto (Unlicense), auditado y reproducible desde su commit fijado.
 
+La licencia 0BSD de este repositorio cubre solamente el soporte, los scripts, la
+documentacion y el packaging escritos para el proyecto. No cubre ni concede
+derechos sobre el cliente propietario de Wispr, que nunca se guarda en Git.
+
 Wispr no publica ni soporta oficialmente una version Linux. El resultado es un
 port comunitario y puede romperse con una futura actualizacion del servicio.
 
-## Que necesitas copiar
+## Dos rutas de instalacion distintas
+
+### Ruta 1: repositorio completo (disponible hoy)
+
+Esta es la ruta funcional y validada actualmente para otra maquina Arch Linux
+x86_64 con Hyprland: copia o clona **todo** el repositorio y ejecuta
+`./install.sh` como se explica mas abajo. El instalador obtiene los artefactos,
+ensambla el runtime y hace la integracion de sistema y de usuario.
+
+Siguen siendo especificos de cada maquina y usuario: disponer de una sesion
+Hyprland activa, acceso a `sudo` y red durante la instalacion, volver a iniciar
+sesion si cambia el acceso a dispositivos, completar el login de Wispr,
+seleccionar el microfono y realizar la validacion final de dictado. Una
+configuracion Hyprland en Lua tampoco se modifica automaticamente.
+
+### Ruta 2: AUR (preparada, pero aun no publicada)
+
+El futuro paquete se llamara `wispr-flow-hyprland`. **Todavia no esta publicado
+en AUR**: faltan fijar el commit publico del repositorio de soporte y su hash, y
+completar la validacion final. Cuando se publique, la ruta sera:
+
+```bash
+yay -S wispr-flow-hyprland
+wispr-flow --setup
+wispr-flow --doctor
+```
+
+`wispr-flow --setup` se ejecuta como el usuario normal, nunca con `sudo`. Crea o
+repara una configuracion Linux valida, oculta Flow Bar en Hyprland, registra el
+callback `wispr-flow:` con `xdg-mime` cuando esta disponible e instala solamente
+en Hyprland las reglas gestionadas del compositor.
+
+El paquete AUR existente `wispr-flow-appimage` tambien proporciona y entra en
+conflicto con `wispr-flow`. Por ello no puede instalarse a la vez que
+`wispr-flow-hyprland`: hay que escoger una de las dos variantes. Este proyecto
+no usa `replaces`, por lo que el cambio nunca se realiza silenciosamente.
+
+## Que necesitas copiar para la ruta del repositorio
 
 No descargues una AppImage, un instalador de Windows ni Electron manualmente.
 `install.sh` descarga y construye todo lo necesario. Debes conservar junta la
@@ -37,9 +78,14 @@ whsprflow-arch/
 |   |   `-- uinput.rs
 |   `-- linux-runtime-fixes.sh
 |-- scripts/
+|   |-- assemble-app.sh
 |   `-- build-helper.sh
+|-- packaging/
+|   `-- aur/
 |-- tests/
 |   `-- smoke.sh
+|-- LICENSE
+|-- REUSE.toml
 `-- README.md
 ```
 
@@ -55,7 +101,7 @@ whsprflow-arch/
 No ejecutes el instalador ni la aplicacion completa con `sudo`. El propio script
 pedira `sudo` solamente para las operaciones que lo necesitan.
 
-## Instalacion recomendada
+## Instalacion con el repositorio completo
 
 1. Abre una terminal dentro de Hyprland y entra en la carpeta del proyecto. Usa
    la ruta real en la que tengas `whsprflow-arch`:
@@ -96,7 +142,8 @@ pedira `sudo` solamente para las operaciones que lo necesitan.
 6. Introduce tu clave de `sudo` cuando se solicite y confirma la instalacion de
    paquetes de `pacman`. El instalador hace automaticamente todo esto:
 
-   - instala las dependencias de Arch, incluido XWayland y `wl-clipboard`;
+   - instala las dependencias de Arch, incluidos `asar`, XWayland y
+     `wl-clipboard`;
    - descarga el cliente oficial de Wispr Flow `1.6.447`;
    - descarga Electron Linux `42.3.0`;
    - usa el helper Linux abierto `0.1.2`, parcheado desde el commit fijado;
@@ -117,6 +164,22 @@ pedira `sudo` solamente para las operaciones que lo necesitan.
    Las descargas verificadas quedan en `~/.cache/whsprflow-arch`, de modo que una
    reinstalacion no tiene que descargarlas otra vez. Los directorios temporales
    de construccion se borran automaticamente.
+
+### Arquitectura del ensamblado
+
+La construccion esta separada de la instalacion del sistema.
+`scripts/assemble-app.sh` recibe mediante flags explicitos el NUPKG, Electron,
+SQLite, el helper y un checkout local del port; usa el comando `asar` del
+sistema y publica solamente un runtime directo ya verificado (`wispr-flow`,
+`resources`, etc.). No descarga artefactos, no clona repositorios, no usa
+`sudo`/`pacman` ni escribe en el HOME real. El directorio de salida no puede
+existir previamente.
+
+`install.sh` sigue verificando y obteniendo los inputs fijados, llama a ese
+ensamblador con `/usr/bin/asar` y despues integra el runtime bajo el layout
+existente `usr/lib/wispr-flow`. Por tanto, el ensamblado reutilizable necesita
+el paquete Arch `asar`; ya no descarga una copia temporal con un gestor de
+paquetes JavaScript.
 
 7. Comprueba que la salida termina de forma parecida a esta:
 
@@ -203,6 +266,7 @@ archivo ajeno con ese nombre y conserva los symlinks de la configuracion.
 Comandos utiles:
 
 ```bash
+wispr-flow --setup         # configuracion inicial para paquetes del sistema
 wispr-flow --fix-shortcut  # repara un atajo Fn heredado de macOS
 wispr-flow --flow-bar on   # muestra una barra compacta persistente
 wispr-flow --flow-bar off  # muestra Status solo durante el dictado
