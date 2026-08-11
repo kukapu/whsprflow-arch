@@ -4,6 +4,16 @@ set -Eeuo pipefail
 
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/Wispr Flow"
 config_file="$config_dir/config.json"
+hypr_dir="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
+hypr_main="$hypr_dir/hyprland.conf"
+hypr_lua="$hypr_dir/hyprland.lua"
+hypr_rules="$hypr_dir/wispr-flow.conf"
+hypr_autostart="$hypr_dir/autostart.conf"
+rules_start='# >>> whsprflow-arch rules >>>'
+rules_end='# <<< whsprflow-arch rules <<<'
+autostart_start='# >>> whsprflow-arch autostart >>>'
+autostart_end='# <<< whsprflow-arch autostart <<<'
+rules_owner='# Managed by whsprflow-arch. Only the real Flow Hub is affected.'
 
 die() {
 	printf 'ERROR: %s\n' "$*" >&2
@@ -15,35 +25,44 @@ have_jq() {
 }
 
 rewrite_config() {
-	local hide_bar="$1"
+	local hide_bar="$1" reset_shortcut="${2:-false}"
 	have_jq
 	mkdir -p "$config_dir"
 	umask 077
 	local tmp
 	tmp="$(mktemp "$config_dir/config.json.XXXXXX")"
 	if [[ -f $config_file ]]; then
-		jq --arg hide "$hide_bar" '
+		jq --arg hide "$hide_bar" --arg reset "$reset_shortcut" '
 			.prefs = (.prefs // {}) |
 			.prefs.cache = (.prefs.cache // {}) |
 			.prefs.user = (.prefs.user // {}) |
+			(
+				if $reset == "true" then "160+162"
+				else (
+					[.prefs.user.shortcuts // {} | to_entries[] |
+						select(.value == "ptt" and (.key | test("^-?[0-9]+(\\+-?[0-9]+)+$")))] |
+					.[0].key // "160+162"
+				)
+				end
+			) as $pttKey |
+			($pttKey | split("+") | map(tonumber)) as $pttCodes |
 			.prefs.user.shortcuts = (
 				((.prefs.user.shortcuts // {}) | with_entries(select(.value != "ptt")))
-				+ {"162+91": "ptt"}
+				+ {($pttKey): "ptt"}
 			) |
 			.prefs.cache.splitKeybinds = (
 				((.prefs.cache.splitKeybinds // []) | map(select(.value != "ptt")))
-				+ [{"shortcut": [162, 91], "value": "ptt"}]
+				+ [{"shortcut": $pttCodes, "value": "ptt"}]
 			) |
-			.prefs.user.modifierShortcut = "164" |
 			if $hide == "true" then .prefs.user.hideFlowBarPermanently = true else . end
 		' "$config_file" > "$tmp"
 	else
 		jq -n --arg hide "$hide_bar" '
 			{
 				prefs: {
-					cache: {splitKeybinds: [{shortcut: [162, 91], value: "ptt"}]},
+					cache: {splitKeybinds: [{shortcut: [160, 162], value: "ptt"}]},
 					user: {
-						shortcuts: {"162+91": "ptt"},
+						shortcuts: {"160+162": "ptt"},
 						modifierShortcut: "164",
 						hideFlowBarPermanently: ($hide == "true"),
 						openAtLogin: false
@@ -56,19 +75,193 @@ rewrite_config() {
 	chmod 0600 "$config_file"
 }
 
+ptt_shortcut() {
+	jq -r '[.prefs.user.shortcuts // {} | to_entries[] | select(.value == "ptt")] | .[0].key // empty' "$config_file"
+}
+
+shortcut_label() {
+	case "$1" in
+		160+162|161+162|160+163|161+163) printf 'Ctrl+Shift' ;;
+		91+162|91+163|92+162|92+163|162+91|163+91|162+92|163+92) printf 'Ctrl+Super' ;;
+		*) printf 'codigos %s' "$1" ;;
+	esac
+}
+
+require_hypr_conf() {
+	if [[ -f $hypr_lua && ! -f $hypr_main ]]; then
+		die 'Esta sesion usa hyprland.lua; la integracion automatica solo modifica la configuracion .conf detectada y no sobrescribira Lua.'
+	fi
+	[[ -f $hypr_main ]] || die "No existe $hypr_main."
+}
+
+remove_managed_block() {
+	local file="$1" start="$2" end="$3"
+	[[ -f $file ]] || return 0
+	local rc target tmp
+	if managed_block_present "$file" "$start" "$end"; then
+		:
+	else
+		rc=$?
+		((rc == 1)) && return 0
+		die "Los marcadores gestionados de $file estan incompletos o duplicados; no se modifica el archivo."
+	fi
+	target="$file"
+	if [[ -L $file ]]; then
+		target="$(readlink -f "$file")"
+		[[ -f $target ]] || die "El enlace $file no apunta a un archivo valido."
+	fi
+	tmp="$(mktemp "${target}.XXXXXX")"
+	awk -v start="$start" -v end="$end" '
+		$0 == start { skip = 1; next }
+		$0 == end { skip = 0; next }
+		!skip { print }
+	' "$target" > "$tmp"
+	chmod --reference="$target" "$tmp"
+	mv "$tmp" "$target"
+}
+
+managed_block_present() {
+	local file="$1" start="$2" end="$3"
+	[[ -f $file ]] || return 1
+	awk -v start="$start" -v end="$end" '
+		$0 == start {
+			starts++
+			if (inside || starts > 1) invalid = 1
+			inside = 1
+			next
+		}
+		$0 == end {
+			ends++
+			if (!inside || ends > 1) invalid = 1
+			inside = 0
+			next
+		}
+		END {
+			if (invalid || inside || starts != ends) exit 2
+			exit starts == 1 ? 0 : 1
+		}
+	' "$file" >/dev/null
+}
+
+validate_rules_file() {
+	[[ -e $hypr_rules || -L $hypr_rules ]] || return 0
+	[[ ! -L $hypr_rules ]] \
+		|| die "$hypr_rules es un enlace simbolico ajeno; no se modifica."
+	local first=''
+	IFS= read -r first < "$hypr_rules" || true
+	[[ $first == "$rules_owner" ]] \
+		|| die "$hypr_rules ya existe y no pertenece a whsprflow-arch; no se modifica."
+}
+
+reload_hyprland() {
+	[[ ${WISPR_FLOW_SKIP_HYPR_RELOAD:-0} == 1 ]] && return 0
+	command -v hyprctl >/dev/null 2>&1 || return 0
+	hyprctl clients -j >/dev/null 2>&1 || return 0
+	hyprctl reload >/dev/null
+	local errors
+	errors="$(hyprctl configerrors)"
+	[[ -z $errors ]] || die "Hyprland rechazo la configuracion:\n$errors"
+}
+
+configure_hyprland_rules() {
+	case "${1:-}" in
+		on)
+			require_hypr_conf
+			mkdir -p "$hypr_dir"
+			validate_rules_file
+			remove_managed_block "$hypr_main" "$rules_start" "$rules_end"
+			local tmp
+			tmp="$(mktemp "${hypr_rules}.XXXXXX")"
+			cat > "$tmp" <<EOF
+$rules_owner
+windowrule = float on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
+windowrule = center on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
+windowrule = size 1350 850, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
+windowrule = persistent_size on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
+windowrule = no_shortcuts_inhibit on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
+windowrule = float on, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$
+windowrule = no_focus on, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$
+windowrule = no_follow_mouse on, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$
+windowrule = no_shortcuts_inhibit on, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$
+windowrule = border_size 0, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$
+EOF
+			mv "$tmp" "$hypr_rules"
+			chmod 0644 "$hypr_rules"
+			cat >> "$hypr_main" <<EOF
+
+$rules_start
+source = $hypr_rules
+$rules_end
+EOF
+			reload_hyprland
+			printf 'Reglas de Hyprland instaladas para Flow Hub.\n'
+			;;
+		off)
+			validate_rules_file
+			remove_managed_block "$hypr_main" "$rules_start" "$rules_end"
+			rm -f "$hypr_rules"
+			reload_hyprland
+			printf 'Reglas de Hyprland eliminadas.\n'
+			;;
+		check)
+			validate_rules_file
+			[[ -f $hypr_rules ]] && managed_block_present "$hypr_main" "$rules_start" "$rules_end"
+			;;
+		*) die 'Uso: wispr-flow --hyprland-rules on|off' ;;
+	esac
+}
+
+configure_autostart() {
+	local rc
+	case "${1:-}" in
+		on)
+			require_hypr_conf
+			command -v uwsm-app >/dev/null 2>&1 || die "Omarchy no tiene 'uwsm-app'."
+			mkdir -p "$hypr_dir"
+			touch "$hypr_autostart"
+			remove_managed_block "$hypr_autostart" "$autostart_start" "$autostart_end"
+			cat >> "$hypr_autostart" <<EOF
+
+$autostart_start
+exec-once = uwsm-app -- wispr-flow --background
+$autostart_end
+EOF
+			printf 'Autostart activado en %s.\n' "$hypr_autostart"
+			;;
+		off)
+			remove_managed_block "$hypr_autostart" "$autostart_start" "$autostart_end"
+			printf 'Autostart desactivado.\n'
+			;;
+		status)
+			if managed_block_present "$hypr_autostart" "$autostart_start" "$autostart_end"; then
+				printf 'Autostart: activado\n'
+			else
+				rc=$?
+				if ((rc == 1)); then
+					printf 'Autostart: desactivado\n'
+					return 1
+				fi
+				die "Los marcadores gestionados de $hypr_autostart estan incompletos o duplicados."
+			fi
+			;;
+		*) die 'Uso: wispr-flow --autostart on|off|status' ;;
+	esac
+}
+
 case "${1:-}" in
 	bootstrap)
 		hide=false
 		[[ ${2:-} == --hide-flow-bar ]] && hide=true
 		rewrite_config "$hide"
-		printf 'Atajo PTT Linux configurado: Ctrl+Super\n'
+		key="$(ptt_shortcut)"
+		printf 'Atajo PTT Linux configurado: %s\n' "$(shortcut_label "$key")"
 		if $hide; then
 			printf 'Flow Bar oculta para evitar la superficie transparente de Hyprland.\n'
 		fi
 		;;
 	fix-shortcut)
-		rewrite_config false
-		printf 'Atajo PTT reparado: Ctrl+Super. Reinicia Wispr Flow.\n'
+		rewrite_config false true
+		printf 'Atajo PTT reparado: Ctrl+Shift. Reinicia Wispr Flow.\n'
 		;;
 	flow-bar)
 		have_jq
@@ -87,16 +280,28 @@ case "${1:-}" in
 		;;
 	check)
 		have_jq
-		if [[ -f $config_file ]] \
-			&& jq -e '.prefs.user.shortcuts["162+91"] == "ptt"' "$config_file" >/dev/null; then
-			printf '[PASS] Atajo PTT Linux: Ctrl+Super\n'
+		if [[ -f $config_file ]] && jq -e '
+			[.prefs.user.shortcuts // {} | to_entries[] |
+				select(.value == "ptt" and (.key | test("^-?[0-9]+(\\+-?[0-9]+)+$")))] as $keys |
+			($keys[0].key | split("+") | map(tonumber)) as $codes |
+			($keys | length) == 1 and
+			(.prefs.cache.splitKeybinds // [] | any(.value == "ptt" and .shortcut == $codes))
+		' "$config_file" >/dev/null; then
+			key="$(ptt_shortcut)"
+			printf '[PASS] Atajo PTT Linux: %s\n' "$(shortcut_label "$key")"
 		else
 			printf '[FAIL] Atajo PTT no es valido para Linux; ejecuta wispr-flow --fix-shortcut\n'
 			exit 1
 		fi
 		;;
+	hyprland-rules)
+		configure_hyprland_rules "${2:-}"
+		;;
+	autostart)
+		configure_autostart "${2:-}"
+		;;
 	*)
-		printf 'Uso: wispr-flow-configure bootstrap|fix-shortcut|flow-bar on|off|check\n' >&2
+		printf 'Uso: wispr-flow-configure bootstrap|fix-shortcut|flow-bar on|off|check|hyprland-rules on|off|autostart on|off|status\n' >&2
 		exit 2
 		;;
 esac

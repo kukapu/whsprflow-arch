@@ -7,15 +7,32 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 for script in "$root/install.sh" "$root/uninstall.sh" "$root/bin/wispr-flow" \
-	"$root/bin/wispr-flow-configure"; do
+	"$root/bin/wispr-flow-configure" "$root/patches/linux-runtime-fixes.sh" \
+	"$root/scripts/build-helper.sh"; do
 	bash -n "$script"
 done
+
+sha256sum "$root/patches/helper/uinput.rs" \
+	| grep -q '^e0ac469f0d3c6227802d7beb364b16b3b52f12b6838df35bae7e9950ab5cc919 '
+sha256sum "$root/assets/wispr-flow-linux-helper-x86_64" \
+	| grep -q '^5f069506ccf51964f05ba6b06b7a1bfbb42cd2a5d64437c965abba628c4b45b0 '
+file "$root/assets/wispr-flow-linux-helper-x86_64" | grep -q 'ELF 64-bit.*x86-64'
 
 HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
 	"$root/bin/wispr-flow-configure" bootstrap
 
 config="$tmp/config/Wispr Flow/config.json"
-jq -e '.prefs.user.hideFlowBarPermanently == false' "$config" >/dev/null
+jq -e '
+	.prefs.user.hideFlowBarPermanently == false and
+	.prefs.user.shortcuts["160+162"] == "ptt" and
+	(.prefs.cache.splitKeybinds | any(.value == "ptt" and .shortcut == [160, 162]))
+' "$config" >/dev/null
+
+jq '
+	.prefs.user.shortcuts = {"162+91": "ptt"} |
+	.prefs.cache.splitKeybinds = [{shortcut: [162, 91], value: "ptt"}]
+' "$config" > "$tmp/custom-shortcut.json"
+mv "$tmp/custom-shortcut.json" "$config"
 
 HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
 	"$root/bin/wispr-flow-configure" bootstrap --hide-flow-bar
@@ -28,10 +45,167 @@ jq -e '
 ' "$config" >/dev/null
 
 HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	"$root/bin/wispr-flow-configure" fix-shortcut
+jq -e '
+	.prefs.user.shortcuts["160+162"] == "ptt" and
+	(.prefs.cache.splitKeybinds | any(.value == "ptt" and .shortcut == [160, 162]))
+' "$config" >/dev/null
+
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
 	"$root/bin/wispr-flow-configure" flow-bar on
 jq -e '.prefs.user.hideFlowBarPermanently == false' "$config" >/dev/null
 
 HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
 	"$root/bin/wispr-flow-configure" check
+
+mkdir -p "$tmp/config/hypr"
+printf '# test hyprland config\n' > "$tmp/config/hypr/hyprland.conf"
+printf '# test autostart config\n' > "$tmp/config/hypr/autostart.conf"
+
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules on
+grep -qxF '# >>> whsprflow-arch rules >>>' "$tmp/config/hypr/hyprland.conf"
+grep -qF 'match:class ^wispr-flow$, match:title ^(Flow )?Hub$' "$tmp/config/hypr/wispr-flow.conf"
+
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	"$root/bin/wispr-flow-configure" autostart on
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	"$root/bin/wispr-flow-configure" autostart status
+grep -qxF 'exec-once = uwsm-app -- wispr-flow --background' "$tmp/config/hypr/autostart.conf"
+
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	"$root/bin/wispr-flow-configure" autostart off
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules off
+! grep -qF 'whsprflow-arch' "$tmp/config/hypr/hyprland.conf"
+[[ ! -e $tmp/config/hypr/wispr-flow.conf ]]
+
+printf '# before\n%s\n# user setting\n' '# >>> whsprflow-arch rules >>>' \
+	> "$tmp/config/hypr/hyprland.conf"
+cp "$tmp/config/hypr/hyprland.conf" "$tmp/malformed.expected"
+if HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules off 2>/dev/null; then
+	printf 'ERROR: un bloque gestionado incompleto debe rechazarse.\n' >&2
+	exit 1
+fi
+cmp "$tmp/malformed.expected" "$tmp/config/hypr/hyprland.conf"
+
+rm -f "$tmp/config/hypr/hyprland.conf"
+printf '# symlinked config\n' > "$tmp/config/hypr/hyprland.real.conf"
+ln -s hyprland.real.conf "$tmp/config/hypr/hyprland.conf"
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules on
+[[ -L $tmp/config/hypr/hyprland.conf ]]
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules off
+[[ -L $tmp/config/hypr/hyprland.conf ]]
+! grep -qF 'whsprflow-arch' "$tmp/config/hypr/hyprland.real.conf"
+
+printf '# user-owned rules\n' > "$tmp/config/hypr/wispr-flow.conf"
+cp "$tmp/config/hypr/wispr-flow.conf" "$tmp/rules.expected"
+if HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules on 2>/dev/null; then
+	printf 'ERROR: las reglas ajenas no deben sobrescribirse.\n' >&2
+	exit 1
+fi
+cmp "$tmp/rules.expected" "$tmp/config/hypr/wispr-flow.conf"
+rm "$tmp/config/hypr/wispr-flow.conf"
+
+printf '# autostart\n' > "$tmp/config/hypr/autostart.conf"
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	"$root/bin/wispr-flow-configure" autostart on
+rm "$tmp/config/hypr/hyprland.conf"
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	"$root/bin/wispr-flow-configure" autostart off
+! grep -qF 'whsprflow-arch' "$tmp/config/hypr/autostart.conf"
+
+cat > "$tmp/main.js" <<'EOF'
+const G=()=>{const e=x.RA.statusWindow;e.showInactive(),a().info("Showing status window")};
+Ye=(e=v.H8)=>{const t=ne.RA.statusWindow;if(!t||t.isDestroyed())return a().error("Status window is not available or destroyed. Recreating."),void(ne.RA.statusWindow=W());const n=t.isAlwaysOnTop(),r=t.isVisible();if(n&&r)e&&(t.setAlwaysOnTop(!0,"screen-saver"),t.showInactive());else{t.setAlwaysOnTop(!0,"screen-saver"),t.showInactive()}};
+const start=e=>{(()=>{(0,ee.ui)(!0)})(e),ke(O._W.Listening),foo()};
+const stop=e=>{ke(O._W.Stopping),Ve(e),foo()};
+const te=e=>foo(e,A.tD,A.H8,570,u,480),ne=1;
+const status=e=>{p.ZZ.status=e,p.ZZ.statusLastUpdatedTime=Date.now();const s=foo()};
+EOF
+"$root/patches/linux-runtime-fixes.sh" "$tmp/main.js"
+"$root/patches/linux-runtime-fixes.sh" "$tmp/main.js"
+grep -qF 'WISPR_LINUX_HIDE_STATUS_WINDOW_SHOW' "$tmp/main.js"
+grep -qF '/*WISPR_LINUX_HIDE_STATUS_WINDOW_SHOW*/"1"===process.env.WISPR_FLOW_HIDE_STATUS_WINDOW?' "$tmp/main.js"
+grep -qF 'WISPR_LINUX_HIDE_STATUS_WINDOW_DICTATION' "$tmp/main.js"
+grep -qF 'WISPR_LINUX_LOCAL_START_SOUND' "$tmp/main.js"
+grep -qF '"1"===process.env.WISPR_FLOW_TRANSIENT_STATUS_WINDOW&&ne.RA.statusWindow?.showInactive()' "$tmp/main.js"
+grep -qF 'WISPR_LINUX_LOCAL_STOP_SOUND' "$tmp/main.js"
+grep -qF 'WISPR_LINUX_COMPACT_STATUS_WINDOW' "$tmp/main.js"
+grep -qF 'WISPR_LINUX_TRANSIENT_STATUS_HIDE' "$tmp/main.js"
+[[ $(grep -o 'WISPR_LINUX_' "$tmp/main.js" | wc -l) -eq 6 ]]
+
+mkdir -p "$tmp/app/usr/lib/wispr-flow/resources/Release" "$tmp/fake-bin" "$tmp/home"
+cat > "$tmp/app/usr/lib/wispr-flow/launcher-common.sh" <<'EOF'
+setup_logging() { log_file="${TMPDIR:?}/wispr-flow-test.log"; }
+setup_electron_env() { :; }
+cleanup_stale_lock() { :; }
+detect_display_backend() { :; }
+check_display() { return 0; }
+log_message() { :; }
+log_session_env() { :; }
+build_electron_args() {
+	electron_args=()
+	[[ ${WISPR_USE_WAYLAND:-0} == 1 ]] && electron_args+=(--wayland-test)
+}
+EOF
+cat > "$tmp/app/usr/lib/wispr-flow/wispr-flow" <<'EOF'
+#!/usr/bin/env bash
+printf 'wayland=%s\nargs=%s\n' "${WISPR_USE_WAYLAND-unset}" "$*" > "${WISPR_TEST_OUTPUT:?}"
+EOF
+chmod +x "$tmp/app/usr/lib/wispr-flow/wispr-flow"
+cat > "$tmp/fake-bin/hyprctl" <<'EOF'
+#!/usr/bin/env bash
+[[ ${WISPR_TEST_HYPR_OFFLINE:-0} == 1 ]] && exit 1
+case "$1" in
+	clients) printf '[{"class":"wispr-flow","title":"Hub","address":"0x123","workspace":{"id":1,"name":"1"}}]\n' ;;
+	dispatch) printf 'dispatch rejected\n' >&2; exit 1 ;;
+	*) printf '{}\n' ;;
+esac
+EOF
+chmod +x "$tmp/fake-bin/hyprctl"
+
+printf '# offline Hyprland config\n' > "$tmp/config/hypr/hyprland.conf"
+PATH="$tmp/fake-bin:$PATH" HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	WISPR_TEST_HYPR_OFFLINE=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules on
+PATH="$tmp/fake-bin:$PATH" HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules off
+
+if PATH="$tmp/fake-bin:$PATH" HOME="$tmp/home" WISPR_FLOW_INSTALL_ROOT="$tmp/app" \
+	"$root/bin/wispr-flow" --hide 2>/dev/null; then
+	printf 'ERROR: --hide debe propagar un fallo de hyprctl.\n' >&2
+	exit 1
+fi
+
+TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron.out" HOME="$tmp/home" \
+	WISPR_FLOW_INSTALL_ROOT="$tmp/app" WISPR_FLOW_BACKEND=auto WISPR_USE_WAYLAND=1 \
+	"$root/bin/wispr-flow"
+grep -qxF 'wayland=unset' "$tmp/electron.out"
+grep -qxF 'args=' "$tmp/electron.out"
+
+TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron-x11.out" HOME="$tmp/home" \
+	XDG_CONFIG_HOME="$tmp/config" XDG_CURRENT_DESKTOP=Hyprland WAYLAND_DISPLAY=wayland-test \
+	WISPR_FLOW_INSTALL_ROOT="$tmp/app" "$root/bin/wispr-flow"
+grep -qF -- '--ozone-platform=x11' "$tmp/electron-x11.out"
+
+jq '.prefs.user.hideFlowBarPermanently = true' "$config" > "$tmp/hidden-config.json"
+mv "$tmp/hidden-config.json" "$config"
+TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron-transient.out" HOME="$tmp/home" \
+	XDG_CONFIG_HOME="$tmp/config" XDG_CURRENT_DESKTOP=Hyprland WAYLAND_DISPLAY=wayland-test \
+	WISPR_FLOW_INSTALL_ROOT="$tmp/app" "$root/bin/wispr-flow"
+grep -qF -- '--ozone-platform=x11' "$tmp/electron-transient.out"
+
+TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron-wayland.out" HOME="$tmp/home" \
+	XDG_CONFIG_HOME="$tmp/config" XDG_CURRENT_DESKTOP=Hyprland WAYLAND_DISPLAY=wayland-test \
+	WISPR_FLOW_INSTALL_ROOT="$tmp/app" WISPR_FLOW_TRANSIENT_STATUS_WINDOW=0 \
+	"$root/bin/wispr-flow"
+grep -qxF 'wayland=1' "$tmp/electron-wayland.out"
+grep -qF -- '--wayland-test' "$tmp/electron-wayland.out"
 
 printf 'Smoke tests OK\n'

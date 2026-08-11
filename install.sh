@@ -6,15 +6,17 @@ IFS=$'\n\t'
 readonly APP_VERSION='1.6.447'
 readonly ELECTRON_VERSION='42.3.0'
 readonly PORT_COMMIT='6fb43cd809f8319a9e05da4b4e7a2d3264c126ab'
+readonly HELPER_COMMIT='fa93fcf31d9ee7a9591a8dce1852f815d1b0dec5'
 readonly NUPKG_NAME="WisprFlow-${APP_VERSION}-full.nupkg"
 readonly NUPKG_URL="https://dl.wisprflow.com/wispr-flow/win32/x64/${NUPKG_NAME}"
 readonly NUPKG_SHA256='c5a6175c74028c30b11c9a96a295df1b47780929ceaf3753a96ffa855b591f03'
 readonly ELECTRON_NAME="electron-v${ELECTRON_VERSION}-linux-x64.zip"
 readonly ELECTRON_URL="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/${ELECTRON_NAME}"
 readonly ELECTRON_SHA256='487a667ca6a734b958c16cff1df74d9d44d2c18a6cccdb4dd51f6301a356c420'
-readonly HELPER_NAME='wispr-flow-linux-helper-x86_64'
-readonly HELPER_URL="https://github.com/wispr-flow-linux/helper/releases/download/v0.1.2/${HELPER_NAME}"
-readonly HELPER_SHA256='66f6ee8232fa22ec419493f7dbc91f0fc636cd84cd668c1d935b3c1140db2658'
+readonly HELPER_NAME="wispr-flow-linux-helper-${HELPER_COMMIT}-arch-fixes-x86_64"
+readonly HELPER_SHA256='5f069506ccf51964f05ba6b06b7a1bfbb42cd2a5d64437c965abba628c4b45b0'
+readonly INSTALL_MARKER='.whsprflow-arch-install'
+readonly INSTALL_MARKER_VALUE='whsprflow-arch-v1'
 readonly SQLITE_NAME='node_sqlite3-x86_64.node'
 readonly SQLITE_URL="https://github.com/wispr-flow-linux/native-modules/releases/download/native-v1/${SQLITE_NAME}"
 readonly SQLITE_SHA256='c9bd0419f77efb3b5d3a691fda04e265f740ad8dc195f0b56003cdeac92e9a34'
@@ -23,6 +25,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/whsprflow-arch"
 system_install=true
 system_setup=true
+custom_install_root=false
+[[ -n ${WISPR_FLOW_INSTALL_ROOT:-} ]] && custom_install_root=true
+install_user="$(id -un)"
 
 usage() {
 	cat <<'EOF'
@@ -73,8 +78,49 @@ download() {
 	sha_ok "$output" "$expected" || die "SHA-256 incorrecto para $(basename "$output")"
 }
 
+wrapper_owned() {
+	local wrapper="$1"
+	[[ -f $wrapper ]] && grep -qF 'WISPR_FLOW_ARCH_WRAPPER=1' "$wrapper"
+}
+
+validate_install_root() {
+	local root="$1" wrapper="$2" allow_legacy="$3"
+	[[ $root == /* && $root != / && $root != "$HOME" && ! -L $root ]] \
+		|| die "Ruta de instalacion insegura: $root"
+	[[ -e $root ]] || return 0
+	if [[ -f $root/$INSTALL_MARKER ]] \
+			&& [[ $(< "$root/$INSTALL_MARKER") == "$INSTALL_MARKER_VALUE" ]]; then
+		return 0
+	fi
+	$allow_legacy && wrapper_owned "$wrapper" && return 0
+	die "$root ya existe y no tiene la marca de propiedad de whsprflow-arch; no se reemplaza."
+}
+
+stop_existing_install() {
+	local root="$1"
+	[[ -x $root/usr/lib/wispr-flow/wispr-flow ]] || return 0
+	info "Deteniendo la instalacion existente en $root"
+	WISPR_FLOW_INSTALL_ROOT="$root" "$script_dir/bin/wispr-flow" --stop \
+		|| die "No se pudo detener de forma segura la instalacion en $root."
+}
+
 [[ $(uname -s) == Linux ]] || die 'Este instalador solo funciona en Linux.'
 [[ $(uname -m) == x86_64 ]] || die 'Este build validado requiere x86_64.'
+
+if $system_install; then
+	install_root='/opt/wispr-flow'
+	bin_target='/usr/local/bin/wispr-flow'
+	package_type='system'
+	validate_install_root "$install_root" "$bin_target" true
+else
+	install_root="${WISPR_FLOW_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/whsprflow-arch/app}"
+	install_root="$(realpath -m -- "$install_root")"
+	bin_target="${HOME}/.local/bin/wispr-flow"
+	package_type='user'
+	allow_legacy=true
+	$custom_install_root && allow_legacy=false
+	validate_install_root "$install_root" "$bin_target" "$allow_legacy"
+fi
 
 if [[ ! -r /etc/arch-release ]]; then
 	printf 'AVISO: no se detecta Arch Linux; se omite la instalacion automatica de paquetes.\n' >&2
@@ -85,10 +131,10 @@ if $system_setup; then
 	info 'Instalando dependencias de Arch'
 	sudo pacman -S --needed \
 		acl alsa-lib at-spi2-core curl desktop-file-utils git gtk3 jq libpulse \
-		libsecret nodejs npm nss perl python unzip wl-clipboard xdg-utils xorg-xwayland
+		libsecret nodejs nss perl pnpm python unzip wl-clipboard xdg-utils xorg-xwayland
 fi
 
-for cmd in curl git jq node npx perl python3 sha256sum unzip xdg-mime; do
+for cmd in curl file git jq node perl pnpm python3 sha256sum unzip xdg-mime; do
 	have "$cmd" || die "Falta '$cmd'. Instala las dependencias o no uses --no-system-setup."
 done
 
@@ -98,14 +144,19 @@ trap 'rm -rf "$work_dir"' EXIT
 
 nupkg="$cache_dir/$NUPKG_NAME"
 electron_zip="$cache_dir/$ELECTRON_NAME"
-helper_bin="$cache_dir/$HELPER_NAME"
+helper_bin="$script_dir/assets/wispr-flow-linux-helper-x86_64"
 sqlite_bin="$cache_dir/$SQLITE_NAME"
 
 info 'Descargando y verificando artefactos'
 download "$NUPKG_URL" "$nupkg" "$NUPKG_SHA256"
 download "$ELECTRON_URL" "$electron_zip" "$ELECTRON_SHA256"
-download "$HELPER_URL" "$helper_bin" "$HELPER_SHA256"
 download "$SQLITE_URL" "$sqlite_bin" "$SQLITE_SHA256"
+
+sha_ok "$helper_bin" "$HELPER_SHA256" \
+	|| die 'El helper Linux parcheado incluido no coincide con su SHA-256 fijado.'
+file "$helper_bin" | grep -q 'ELF 64-bit.*x86-64' \
+	|| die 'El helper incluido no es un ELF Linux x86_64.'
+printf 'Verificado %s (commit %s, SHA-256 correcto)\n' "$HELPER_NAME" "$HELPER_COMMIT"
 
 info 'Extrayendo el cliente oficial y Electron Linux'
 mkdir -p "$work_dir/nupkg" "$work_dir/app" "$work_dir/stage/usr/lib/wispr-flow"
@@ -122,7 +173,7 @@ git -C "$work_dir/port" checkout --quiet "$PORT_COMMIT"
 	|| die 'El checkout del port no coincide con el commit fijado.'
 
 info 'Desempaquetando y adaptando el cliente a Linux'
-npx --yes @electron/asar@4.0.1 extract "$resources_src/app.asar" "$work_dir/app"
+pnpm dlx @electron/asar@4.0.1 extract "$resources_src/app.asar" "$work_dir/app"
 
 actual_version="$(node -e 'process.stdout.write(require(process.argv[1]).version)' "$work_dir/app/package.json")"
 [[ $actual_version == "$APP_VERSION" ]] \
@@ -156,8 +207,10 @@ perl -0777 -pi -e '
 	END { die "expected one warm-deeplink, hub-focus, and singleton-exit patch; got deeplink=$n focus=$m singleton=$q\n" unless $n == 1 && $m == 1 && $q == 1 }
 ' "$main_bundle"
 
-# Remove patch backups before repacking.
-shopt -s globstar nullglob
+bash "$script_dir/patches/linux-runtime-fixes.sh" "$main_bundle"
+
+# Remove patch backups before repacking. dotglob is required to traverse .webpack.
+shopt -s globstar nullglob dotglob
 rm -f "$work_dir"/app/**/*.orig
 
 native_dir="$work_dir/app/.webpack/main/native_modules/build/Release"
@@ -175,16 +228,23 @@ resources_dst="$work_dir/stage/usr/lib/wispr-flow/resources"
 mkdir -p "$resources_dst/Release"
 cp -a "$resources_src/assets" "$resources_dst/assets"
 cp -a "$resources_src/migrations" "$resources_dst/migrations"
-cp -a "$resources_src/app.asar.unpacked" "$resources_dst/app.asar.unpacked"
 for extra in ax-inspect-lib.mjs ax-inspect-server.mjs ax-inspect.mjs; do
 	[[ -f $resources_src/$extra ]] && cp "$resources_src/$extra" "$resources_dst/$extra"
 done
 
-npx --yes @electron/asar@4.0.1 pack "$work_dir/app" "$resources_dst/app.asar" --unpack '*.node'
+rm -f "$work_dir/app/.webpack/main/native_modules/lib"/crypt32-*.node
+pnpm dlx @electron/asar@4.0.1 pack "$work_dir/app" "$resources_dst/app.asar" --unpack '*.node'
 install -m 0755 "$sqlite_bin" \
 	"$resources_dst/app.asar.unpacked/.webpack/main/native_modules/build/Release/node_sqlite3.node"
-rm -f "$resources_dst/app.asar.unpacked/.webpack/main/native_modules/lib"/crypt32-*.node
+pnpm dlx @electron/asar@4.0.1 list "$resources_dst/app.asar" > "$work_dir/asar-files.txt"
+if grep -q 'crypt32-' "$work_dir/asar-files.txt"; then
+	die 'El ASAR final todavia referencia modulos crypt32 exclusivos de Windows.'
+fi
+if grep -q '\.orig$' "$work_dir/asar-files.txt"; then
+	die 'El ASAR final todavia contiene backups de los parches.'
+fi
 install -m 0755 "$helper_bin" "$resources_dst/Release/wispr-flow-linux-helper"
+install -m 0644 "$script_dir/assets/UNLICENSE" "$resources_dst/Release/helper.UNLICENSE"
 
 bash "$work_dir/port/scripts/verify-patches.sh" "$resources_dst/app.asar"
 
@@ -195,11 +255,10 @@ install -m 0644 "$work_dir/port/scripts/launcher-common.sh" \
 install -m 0644 "$work_dir/port/scripts/doctor.sh" \
 	"$work_dir/stage/usr/lib/wispr-flow/doctor.sh"
 printf '%s\n' "$APP_VERSION" > "$work_dir/stage/usr/lib/wispr-flow/app-version"
+printf '%s\n' "$INSTALL_MARKER_VALUE" > "$work_dir/stage/$INSTALL_MARKER"
 
 if $system_install; then
-	install_root='/opt/wispr-flow'
-	bin_target='/usr/local/bin/wispr-flow'
-	package_type='system'
+	stop_existing_install "$install_root"
 	info "Instalando en $install_root"
 	sudo rm -rf "${install_root}.new"
 	sudo cp -a "$work_dir/stage" "${install_root}.new"
@@ -213,9 +272,7 @@ if $system_install; then
 	sudo rm -rf "${install_root}.old"
 	sudo install -m 0755 "$script_dir/bin/wispr-flow" "$bin_target"
 else
-	install_root="${WISPR_FLOW_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/whsprflow-arch/app}"
-	bin_target="${HOME}/.local/bin/wispr-flow"
-	package_type='user'
+	stop_existing_install "$install_root"
 	info "Instalando en $install_root"
 	mkdir -p "$(dirname "$install_root")" "$(dirname "$bin_target")"
 	rm -rf "${install_root}.new"
@@ -235,7 +292,8 @@ fi
 info 'Registrando la aplicacion y el callback wispr-flow:'
 applications_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 icons_dir="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
-mkdir -p "$applications_dir" "$icons_dir"
+config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+mkdir -p "$applications_dir" "$icons_dir" "$config_home"
 install -m 0644 "$resources_src/assets/logos/flow-symbol.svg" "$icons_dir/wispr-flow.svg"
 
 desktop_file="$applications_dir/wispr-flow.desktop"
@@ -280,16 +338,18 @@ EOF
 	sudo udevadm control --reload-rules
 	sudo udevadm trigger --subsystem-match=misc --sysname-match=uinput || true
 	sudo udevadm trigger --subsystem-match=input || true
-	if ! id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
-		sudo usermod -aG input "$USER"
-		printf 'Se ha anadido %s al grupo input; cierra sesion al terminar.\n' "$USER"
+	if ! id -nG "$install_user" | tr ' ' '\n' | grep -qx input; then
+		sudo usermod -aG input "$install_user"
+		sudo install -d -m 0755 /var/lib/whsprflow-arch
+		sudo touch "/var/lib/whsprflow-arch/input-group-added-$install_user"
+		printf 'Se ha anadido %s al grupo input; cierra sesion al terminar.\n' "$install_user"
 	fi
-	[[ -e /dev/uinput ]] && sudo setfacl -m "u:${USER}:rw" /dev/uinput || true
+	[[ -e /dev/uinput ]] && sudo setfacl -m "u:${install_user}:rw" /dev/uinput || true
 	for event in /dev/input/event*; do
 		[[ -e $event ]] || continue
 		if udevadm info --query=property --name="$event" 2>/dev/null \
 			| grep -q '^ID_INPUT_KEYBOARD=1$'; then
-			sudo setfacl -m "u:${USER}:r" "$event" || true
+			sudo setfacl -m "u:${install_user}:r" "$event" || true
 		fi
 	done
 fi
@@ -301,6 +361,7 @@ printf 'Ejecutable:   %s\n' "$bin_target"
 printf 'Diagnostico:  wispr-flow --doctor\n'
 printf 'Inicio:       wispr-flow\n'
 if $hide_bar; then
-	printf 'Hyprland:     interfaz XWayland y Flow Bar oculta para evitar el bloqueo de clics.\n'
+	"$configurer_target" hyprland-rules on
+	printf 'Hyprland:     Hub flotante y Status visible solo durante el dictado.\n'
 fi
 printf '\nSi el diagnostico no puede leer /dev/input, cierra sesion y vuelve a entrar.\n'

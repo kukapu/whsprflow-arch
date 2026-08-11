@@ -4,7 +4,10 @@ set -uo pipefail
 
 # WISPR_FLOW_ARCH_WRAPPER=1
 user_root="${WISPR_FLOW_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/whsprflow-arch/app}"
-if [[ -x /opt/wispr-flow/usr/lib/wispr-flow/wispr-flow ]]; then
+if [[ -n ${WISPR_FLOW_INSTALL_ROOT:-} ]]; then
+	install_root="$WISPR_FLOW_INSTALL_ROOT"
+	package_type='appimage'
+elif [[ -x /opt/wispr-flow/usr/lib/wispr-flow/wispr-flow ]]; then
 	install_root='/opt/wispr-flow'
 	package_type='system'
 else
@@ -16,6 +19,7 @@ app_dir="$install_root/usr/lib/wispr-flow"
 electron_bin="$app_dir/wispr-flow"
 helper_bin="$app_dir/resources/Release/wispr-flow-linux-helper"
 configurer="$(dirname "$(readlink -f "$0")")/wispr-flow-configure"
+config_file="${XDG_CONFIG_HOME:-$HOME/.config}/Wispr Flow/config.json"
 
 if [[ ! -x $electron_bin ]]; then
 	printf 'ERROR: Wispr Flow no esta instalado en %s\n' "$install_root" >&2
@@ -25,13 +29,254 @@ fi
 # shellcheck source=/dev/null
 source "$app_dir/launcher-common.sh"
 
+exact_pids() {
+	local target proc pid exe
+	target="$(readlink -f "$1")"
+	for proc in /proc/[0-9]*; do
+		[[ -e $proc/exe ]] || continue
+		exe="$(readlink -f "$proc/exe" 2>/dev/null)" || continue
+		[[ $exe == "$target" ]] || continue
+		pid="${proc##*/}"
+		printf '%s\n' "$pid"
+	done
+}
+
+main_electron_pids() {
+	local pid args
+	while read -r pid; do
+		[[ -n $pid && -r /proc/$pid/cmdline ]] || continue
+		args="$(tr '\0' ' ' < "/proc/$pid/cmdline")"
+		[[ $args == *'--type='* ]] || printf '%s\n' "$pid"
+	done < <(exact_pids "$electron_bin")
+}
+
+has_exact_process() {
+	local pid
+	while read -r pid; do
+		[[ -n $pid ]] && return 0
+	done < <(exact_pids "$1")
+	return 1
+}
+
+wait_for_exit() {
+	local target="$1" attempts="${2:-50}" i
+	for ((i = 0; i < attempts; i++)); do
+		has_exact_process "$target" || return 0
+		sleep 0.1
+	done
+	return 1
+}
+
+signal_exact() {
+	local target="$1" signal="$2" pid
+	while read -r pid; do
+		[[ -n $pid ]] || continue
+		kill -s "$signal" "$pid" 2>/dev/null || true
+	done < <(exact_pids "$target")
+}
+
+virtual_keyboard_present() {
+	local name_file name
+	for name_file in /sys/class/input/event*/device/name; do
+		[[ -r $name_file ]] || continue
+		read -r name < "$name_file"
+		[[ $name == 'Wispr Flow Linux Helper' ]] && return 0
+	done
+	return 1
+}
+
+stop_wispr() {
+	local label="${1:-Deteniendo Wispr Flow}"
+	printf '%s...\n' "$label"
+
+	if has_exact_process "$electron_bin"; then
+		timeout 8 "$0" --quit-app >/dev/null 2>&1 || true
+		wait_for_exit "$electron_bin" 50 || true
+	fi
+
+	# Only signal executables from this installation. No name-based pkill is used.
+	has_exact_process "$helper_bin" && signal_exact "$helper_bin" TERM
+	has_exact_process "$electron_bin" && signal_exact "$electron_bin" TERM
+	wait_for_exit "$helper_bin" 20 || true
+	wait_for_exit "$electron_bin" 20 || true
+
+	has_exact_process "$helper_bin" && signal_exact "$helper_bin" KILL
+	has_exact_process "$electron_bin" && signal_exact "$electron_bin" KILL
+	wait_for_exit "$helper_bin" 20 || true
+	wait_for_exit "$electron_bin" 20 || true
+
+	if has_exact_process "$helper_bin" || has_exact_process "$electron_bin"; then
+		printf 'ERROR: quedan procesos de esta instalacion de Wispr Flow.\n' >&2
+		return 1
+	fi
+	if virtual_keyboard_present; then
+		printf 'ERROR: el teclado virtual de Wispr sigue presente.\n' >&2
+		return 1
+	fi
+	printf 'Wispr Flow detenido; no quedan procesos ni teclado virtual Wispr.\n'
+}
+
+require_hyprland() {
+	command -v hyprctl >/dev/null 2>&1 || {
+		printf 'ERROR: este comando necesita Hyprland e hyprctl.\n' >&2
+		return 1
+	}
+	hyprctl clients -j >/dev/null 2>&1 || {
+		printf 'ERROR: no se puede conectar con la sesion Hyprland actual.\n' >&2
+		return 1
+	}
+}
+
+hub_address() {
+	hyprctl clients -j | jq -r '
+		[.[] | select(
+			(.class // "") == "wispr-flow" and
+			((.title // "") == "Hub" or (.title // "") == "Flow Hub" or
+			 (.initialTitle // "") == "Hub" or (.initialTitle // "") == "Flow Hub")
+		)] | .[0].address // empty
+	'
+}
+
+wait_for_hub() {
+	local address i
+	for ((i = 0; i < 80; i++)); do
+		address="$(hub_address)"
+		if [[ -n $address ]]; then
+			printf '%s\n' "$address"
+			return 0
+		fi
+		sleep 0.1
+	done
+	return 1
+}
+
+dispatch_hyprland() {
+	local output
+	if ! output="$(hyprctl dispatch "$@" 2>&1)"; then
+		printf 'ERROR: Hyprland rechazo %s: %s\n' "$1" "$output" >&2
+		return 1
+	fi
+}
+
+hub_is_in_workspace() {
+	local address="$1" expected="$2"
+	hyprctl clients -j | jq -e --arg address "$address" --arg expected "$expected" '
+		.[] | select(.address == $address) |
+		if ($expected | startswith("special:")) then
+			.workspace.name == $expected
+		else
+			(.workspace.id | tostring) == $expected
+		end
+	' >/dev/null
+}
+
+wait_for_hub_workspace() {
+	local address="$1" expected="$2" i
+	for ((i = 0; i < 30; i++)); do
+		hub_is_in_workspace "$address" "$expected" && return 0
+		sleep 0.1
+	done
+	return 1
+}
+
+raise_app() {
+	if has_exact_process "$electron_bin"; then
+		# A normal second launch asks the singleton to show and focus Flow Hub.
+		timeout 8 "$0" >/dev/null 2>&1 || true
+	else
+		setsid -f "$0" >/dev/null 2>&1
+	fi
+}
+
+show_hub() {
+	require_hyprland || return 1
+	local workspace address
+	workspace="$(hyprctl activeworkspace -j | jq -r '.id')"
+	[[ $workspace =~ ^-?[0-9]+$ ]] || {
+		printf 'ERROR: no se pudo determinar el workspace activo.\n' >&2
+		return 1
+	}
+	raise_app
+	address="$(wait_for_hub)" || {
+		printf 'ERROR: Flow Hub no aparecio en Hyprland. Revisa wispr-flow --logs.\n' >&2
+		return 1
+	}
+	dispatch_hyprland movetoworkspacesilent "$workspace,address:$address" || return 1
+	wait_for_hub_workspace "$address" "$workspace" || {
+		printf 'ERROR: Flow Hub no llego al workspace %s.\n' "$workspace" >&2
+		return 1
+	}
+	dispatch_hyprland focuswindow "address:$address" || return 1
+	printf 'Flow Hub visible en el workspace %s.\n' "$workspace"
+}
+
+hide_hub() {
+	require_hyprland || return 1
+	local address
+	address="$(hub_address)"
+	if [[ -z $address ]]; then
+		printf 'Flow Hub ya esta oculto o aun no se ha creado.\n'
+		return 0
+	fi
+	dispatch_hyprland movetoworkspacesilent "special:wispr-flow,address:$address" || return 1
+	wait_for_hub_workspace "$address" 'special:wispr-flow' || {
+		printf 'ERROR: Flow Hub no llego al workspace especial wispr-flow.\n' >&2
+		return 1
+	}
+	printf 'Flow Hub oculto; Electron y el helper siguen activos.\n'
+}
+
 case "${1:-}" in
 	--fix-shortcut)
 		exec "$configurer" fix-shortcut
 		;;
 	--flow-bar)
 		[[ $# -eq 2 ]] || { printf 'Uso: wispr-flow --flow-bar on|off\n' >&2; exit 2; }
-		exec "$configurer" flow-bar "$2"
+		was_running=false
+		if has_exact_process "$electron_bin"; then
+			was_running=true
+			stop_wispr 'Reiniciando Wispr Flow para cambiar Flow Bar' || exit 1
+		fi
+		"$configurer" flow-bar "$2" || exit 1
+		if $was_running; then
+			setsid -f "$0" --background >/dev/null 2>&1
+			printf 'Wispr Flow reiniciado en segundo plano.\n'
+		fi
+		exit 0
+		;;
+	--stop)
+		stop_wispr 'Solicitando cierre limpio de Wispr Flow'
+		exit $?
+		;;
+	--reset-input)
+		stop_wispr 'Recuperando la entrada virtual de Wispr Flow'
+		exit $?
+		;;
+	--show)
+		show_hub
+		exit $?
+		;;
+	--hide)
+		hide_hub
+		exit $?
+		;;
+	--background)
+		show_hub && hide_hub
+		exit $?
+		;;
+	--autostart)
+		[[ $# -eq 2 ]] || { printf 'Uso: wispr-flow --autostart on|off|status\n' >&2; exit 2; }
+		exec "$configurer" autostart "$2"
+		;;
+	--hyprland-rules)
+		[[ $# -eq 2 ]] || { printf 'Uso: wispr-flow --hyprland-rules on|off\n' >&2; exit 2; }
+		exec "$configurer" hyprland-rules "$2"
+		;;
+	--status)
+		main_count="$(main_electron_pids | wc -l | tr -d ' ')"
+		helper_count="$(exact_pids "$helper_bin" | wc -l | tr -d ' ')"
+		printf 'Electron principal: %s\nHelper: %s\n' "$main_count" "$helper_count"
+		exit 0
 		;;
 	--logs)
 		exec "${PAGER:-less}" "${XDG_CACHE_HOME:-$HOME/.cache}/wispr-flow/launcher.log"
@@ -50,6 +295,14 @@ case "${1:-}" in
 			rc=1
 		fi
 		"$configurer" check || rc=1
+		main_count="$(main_electron_pids | wc -l | tr -d ' ')"
+		helper_count="$(exact_pids "$helper_bin" | wc -l | tr -d ' ')"
+		if ((main_count <= 1 && helper_count <= 1)); then
+			printf '[PASS] Instancias: Electron principal=%s helper=%s\n' "$main_count" "$helper_count"
+		else
+			printf '[FAIL] Instancias duplicadas: Electron principal=%s helper=%s\n' "$main_count" "$helper_count"
+			rc=1
+		fi
 		exit "$rc"
 		;;
 esac
@@ -59,8 +312,63 @@ setup_electron_env
 cleanup_stale_lock
 detect_display_backend
 
+force_xwayland=false
+backend="${WISPR_FLOW_BACKEND:-}"
+
+if [[ -z ${WISPR_FLOW_HIDE_STATUS_WINDOW+x} ]] \
+		&& [[ -f $config_file ]] \
+		&& command -v jq >/dev/null 2>&1 \
+		&& jq -e '.prefs.user.hideFlowBarPermanently == true' "$config_file" >/dev/null; then
+	export WISPR_FLOW_HIDE_STATUS_WINDOW=1
+fi
+if [[ ${WISPR_FLOW_HIDE_STATUS_WINDOW:-0} == 1 ]] \
+		&& [[ ${XDG_CURRENT_DESKTOP,,} == *hyprland* ]] \
+		&& [[ -z ${WISPR_FLOW_TRANSIENT_STATUS_WINDOW+x} ]]; then
+	export WISPR_FLOW_TRANSIENT_STATUS_WINDOW=1
+fi
+if [[ ${WISPR_FLOW_HIDE_STATUS_WINDOW:-0} != 1 ]] \
+		&& [[ -z ${WISPR_FLOW_COMPACT_STATUS_WINDOW+x} ]]; then
+	export WISPR_FLOW_COMPACT_STATUS_WINDOW=1
+fi
+
+if [[ ${WISPR_FLOW_XWAYLAND:-0} == 1 ]]; then
+	backend='x11'
+elif [[ ${WISPR_FLOW_NATIVE_WAYLAND:-0} == 1 ]]; then
+	backend='wayland'
+elif [[ -z $backend && ${WISPR_USE_WAYLAND:-0} == 1 ]]; then
+	backend='wayland'
+elif [[ -z $backend && -n ${WAYLAND_DISPLAY:-} \
+		&& ${XDG_CURRENT_DESKTOP,,} == *hyprland* ]]; then
+	# Native Wayland is used when Status is hidden. A visible Flow Bar uses
+	# XWayland because Electron 42 only supports click-through there.
+	if [[ ${WISPR_FLOW_HIDE_STATUS_WINDOW:-0} == 1 \
+			&& ${WISPR_FLOW_TRANSIENT_STATUS_WINDOW:-0} != 1 ]]; then
+		backend='wayland'
+	else
+		backend='x11'
+	fi
+fi
+
+case "$backend" in
+	'') ;;
+	auto) unset WISPR_USE_WAYLAND ;;
+	wayland) export WISPR_USE_WAYLAND=1 ;;
+	x11|xwayland)
+		unset WISPR_USE_WAYLAND
+		force_xwayland=true
+		;;
+	*)
+		printf 'ERROR: WISPR_FLOW_BACKEND debe ser auto, wayland o x11.\n' >&2
+		exit 2
+		;;
+esac
+
 log_message '--- whsprflow-arch wrapper start ---'
 log_session_env
+log_message "Selected Electron backend: ${backend:-auto}"
+log_message "Flow Status Indicator hidden: ${WISPR_FLOW_HIDE_STATUS_WINDOW:-0}"
+log_message "Flow Status Indicator transient: ${WISPR_FLOW_TRANSIENT_STATUS_WINDOW:-0}"
+log_message "Flow Status Indicator compact: ${WISPR_FLOW_COMPACT_STATUS_WINDOW:-0}"
 
 if ! check_display; then
 	printf 'ERROR: Wispr Flow necesita una sesion grafica.\n' >&2
@@ -69,14 +377,11 @@ fi
 
 build_electron_args "$package_type"
 
-# Electron 42 cannot make the transparent Flow Bar click-through on native
-# Wayland. Hyprland therefore gets an XWayland UI by default, while the helper
-# keeps WAYLAND_DISPLAY and still uses uinput, wl-clipboard and AT-SPI.
-desktop="${XDG_CURRENT_DESKTOP:-}"
-if [[ -n ${WAYLAND_DISPLAY:-} && ${desktop,,} == *hyprland* \
-		&& ${WISPR_FLOW_NATIVE_WAYLAND:-0} != 1 ]]; then
+# A transient or persistent Status window uses XWayland because Electron 42
+# lacks native Wayland click-through. Fully hidden Status can use Wayland.
+if $force_xwayland; then
 	electron_args+=('--ozone-platform=x11')
-	log_message 'Hyprland: forcing XWayland UI; Linux helper remains on Wayland'
+	log_message 'Forcing XWayland UI; Linux helper remains on Wayland'
 fi
 
 cd "$HOME" || exit 1

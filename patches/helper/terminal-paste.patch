@@ -1,0 +1,100 @@
+diff --git a/src/backend/wayland.rs b/src/backend/wayland.rs
+--- a/src/backend/wayland.rs
++++ b/src/backend/wayland.rs
+@@ -7,7 +7,7 @@
+ //! (`wl-copy`/`wl-paste`).
+ //!
+ //! Implemented:
+-//!   * PasteText        — wl-copy the text, then uinput Ctrl+V
++//!   * PasteText        — clipboard + uinput Ctrl+V (Ctrl+Shift+V in terminals)
+ //!   * SimulateKeyPress — VK -> evdev (keymap.rs) -> uinput chord
+ //!   * GetSelectedText  — copy-probe: save clipboard, uinput Ctrl+C, read, restore
+ //!   * GetAccessibilityStatus — true when uinput is usable
+@@ -41,6 +41,43 @@ pub struct WaylandBackend {
+     has_wl_paste: bool,
+ }
+
++fn is_terminal_class(class: &str) -> bool {
++    let class = class.to_ascii_lowercase();
++    matches!(
++        class.as_str(),
++        "alacritty"
++            | "dev.warp.warp"
++            | "foot"
++            | "kitty"
++            | "org.wezfurlong.wezterm"
++            | "xterm"
++            | "urxvt"
++            | "com.mitchellh.ghostty"
++    ) || class.contains("terminal")
++}
++
++fn focused_app_uses_terminal_paste() -> bool {
++    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
++    if !desktop.to_ascii_uppercase().contains("HYPRLAND") {
++        return false;
++    }
++    let Ok(output) = Command::new("hyprctl")
++        .args(["activewindow", "-j"])
++        .output()
++    else {
++        return false;
++    };
++    let Ok(window) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
++        return false;
++    };
++    ["class", "initialClass"].iter().any(|key| {
++        window
++            .get(key)
++            .and_then(serde_json::Value::as_str)
++            .is_some_and(is_terminal_class)
++    })
++}
++
+ impl WaylandBackend {
+     pub fn connect() -> Result<WaylandBackend> {
+         let uinput = UInput::create()?;
+@@ -105,8 +142,14 @@ impl Backend for WaylandBackend {
+         // Let the new selection owner register before Ctrl+V reads it.
+         std::thread::sleep(std::time::Duration::from_millis(30));
+         let ctrl = keymap::flag_to_evdev("Control").unwrap();
++        let mut modifiers = vec![ctrl];
++        if focused_app_uses_terminal_paste() {
++            let shift = keymap::flag_to_evdev("Shift").unwrap();
++            modifiers.push(shift);
++            log::debug!("terminal focused: using Ctrl+Shift+V for paste");
++        }
+         let v = keymap::vk_to_evdev(b'V' as u32).ok_or("no evdev for V")?;
+-        self.uinput.chord(v, &[ctrl])
++        self.uinput.chord(v, &modifiers)
+     }
+
+     fn simulate_key_press(&mut self, keycode_vk: u32, flags: &[String]) -> Result<()> {
+@@ -260,3 +303,27 @@ fn run_capture(prog: &str, args: &[&str]) -> Result<String> {
+         }
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::is_terminal_class;
++
++    #[test]
++    fn terminal_classes_use_terminal_paste_chord() {
++        for class in [
++            "dev.warp.Warp",
++            "kitty",
++            "org.gnome.Terminal",
++            "com.mitchellh.ghostty",
++        ] {
++            assert!(is_terminal_class(class), "{class}");
++        }
++    }
++
++    #[test]
++    fn regular_apps_keep_standard_paste_chord() {
++        for class in ["google-chrome", "Code", "obsidian"] {
++            assert!(!is_terminal_class(class), "{class}");
++        }
++    }
++}

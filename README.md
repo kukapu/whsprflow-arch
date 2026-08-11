@@ -5,6 +5,10 @@ oficial de Windows. No es una reimplementacion de Whisper ni usa Wine: conserva
 el cliente Electron, el login, la cuenta Pro y los servicios cloud de Wispr, y
 sustituye solo la integracion Win32 por un helper Linux de codigo abierto.
 
+El repositorio no redistribuye el cliente propietario. `install.sh` lo descarga
+del CDN oficial y exige su SHA-256. El unico binario incluido es el helper Linux
+abierto (Unlicense), auditado y reproducible desde su commit fijado.
+
 Wispr no publica ni soporta oficialmente una version Linux. El resultado es un
 port comunitario y puede romperse con una futura actualizacion del servicio.
 
@@ -19,11 +23,21 @@ La carpeta minima debe contener:
 
 ```text
 whsprflow-arch/
+|-- assets/
+|   |-- UNLICENSE
+|   `-- wispr-flow-linux-helper-x86_64
 |-- install.sh
 |-- uninstall.sh
 |-- bin/
 |   |-- wispr-flow
 |   `-- wispr-flow-configure
+|-- patches/
+|   |-- helper/
+|   |   |-- terminal-paste.patch
+|   |   `-- uinput.rs
+|   `-- linux-runtime-fixes.sh
+|-- scripts/
+|   `-- build-helper.sh
 |-- tests/
 |   `-- smoke.sh
 `-- README.md
@@ -56,13 +70,13 @@ pedira `sudo` solamente para las operaciones que lo necesitan.
    ls
    ```
 
-   Debes ver, como minimo, `install.sh`, `uninstall.sh`, `bin`, `tests` y
-   `README.md`.
+   Debes ver, como minimo, `assets`, `bin`, `patches`, `scripts`, `tests`,
+   `install.sh`, `uninstall.sh` y `README.md`.
 
 3. Da permisos de ejecucion a los scripts:
 
    ```bash
-   chmod +x install.sh uninstall.sh bin/* tests/*
+   chmod +x install.sh uninstall.sh bin/* patches/*.sh scripts/* tests/*
    ```
 
 4. Ejecuta la prueba local de los scripts:
@@ -85,15 +99,20 @@ pedira `sudo` solamente para las operaciones que lo necesitan.
    - instala las dependencias de Arch, incluido XWayland y `wl-clipboard`;
    - descarga el cliente oficial de Wispr Flow `1.6.447`;
    - descarga Electron Linux `42.3.0`;
-   - descarga el helper Linux `0.1.2` y el modulo SQLite compatible;
-   - comprueba el SHA-256 de cada binario antes de utilizarlo;
+   - usa el helper Linux abierto `0.1.2`, parcheado desde el commit fijado;
+   - descarga el modulo SQLite Linux compatible;
+   - comprueba el SHA-256 y la arquitectura de cada binario;
    - aplica y verifica los parches Linux;
    - instala la aplicacion en `/opt/wispr-flow`;
    - instala el comando `/usr/local/bin/wispr-flow`;
    - registra el protocolo de login `wispr-flow:` y la entrada del menu;
-   - configura `Ctrl+Super` como push-to-talk;
+   - configura `Ctrl+Shift` como push-to-talk si no existe un atajo valido;
+   - muestra Status solo mientras graba o procesa y lo oculta al terminar;
+   - reproduce localmente los sonidos de inicio y fin si estan habilitados;
+   - instala reglas reversibles para que Flow Hub sea flotante y centrado;
    - instala las reglas udev para `/dev/uinput` y los teclados;
-   - anade tu usuario al grupo `input` si todavia no pertenece a el.
+   - anade tu usuario al grupo `input` si todavia no pertenece a el y registra
+     que esa membresia fue creada por este instalador.
 
    Las descargas verificadas quedan en `~/.cache/whsprflow-arch`, de modo que una
    reinstalacion no tiene que descargarlas otra vez. Los directorios temporales
@@ -129,7 +148,7 @@ comprueba especialmente estas lineas:
 - el helper Linux debe arrancar correctamente;
 - Electron debe indicar la version `42.3.0`;
 - el callback `wispr-flow:` debe aparecer registrado;
-- el atajo PTT debe aparecer como `Ctrl+Super`.
+- el atajo PTT debe aparecer como `Ctrl+Shift`.
 
 Un aviso de AT-SPI al principio de la sesion puede ser recuperable; los fallos de
 `/dev/uinput`, teclado, helper o callback deben corregirse antes de usar Flow.
@@ -149,7 +168,7 @@ de nuevo `./install.sh` desde la carpeta del proyecto y repite el diagnostico.
 4. El navegador debe abrir automaticamente un enlace `wispr-flow:` que vuelve a
    la aplicacion. No copies tokens ni edites archivos manualmente.
 5. Selecciona el microfono en Flow y prueba el dictado manteniendo
-   `Ctrl+Super`.
+   `Ctrl+Shift`.
 6. Prueba primero en un editor de texto sencillo y despues en tus aplicaciones
    Wayland habituales.
 
@@ -162,27 +181,87 @@ wispr-flow --logs
 El perfil, la sesion y las preferencias se guardan en
 `~/.config/Wispr Flow/`. Reinstalar conserva ese directorio.
 
-## Hyprland
+## Hyprland y segundo plano
 
-Electron 42 no implementa `setIgnoreMouseEvents()` en Wayland nativo. La Flow
-Bar transparente puede bloquear clics en un rectangulo de 490x440. Por eso el
-wrapper usa XWayland solo para las ventanas de Flow y oculta la Flow Bar; el
-helper conserva `WAYLAND_DISPLAY` y sigue pegando en aplicaciones Wayland con
-`uinput`, `wl-clipboard` y AT-SPI.
+Electron 42 no implementa `setIgnoreMouseEvents()` en Wayland nativo. Por eso el
+wrapper usa XWayland cuando Status es visible o transitorio. Con Flow Bar
+desactivada, el parche mantiene Status oculto en reposo, lo muestra durante la
+grabacion y el procesamiento, y vuelve a ocultarlo en `Idle`, `Error` o
+`Dismissed`. El helper sigue usando las APIs Wayland para portapapeles, entrada
+global e inyeccion de teclas.
+
+Los sonidos de inicio y fin se envian al renderer local y respetan la opcion de
+sonidos de Flow. Al pegar, el helper usa `Ctrl+V` normalmente y
+`Ctrl+Shift+V` cuando la ventana activa de Hyprland es un terminal conocido,
+incluido Warp.
+
+Las reglas gestionadas solo coinciden con clase `wispr-flow` y titulo `Hub` o
+`Flow Hub`. No afectan las ventanas Status, Context Menu ni Scratchpad. Se
+guardan en `~/.config/hypr/wispr-flow.conf`; el configurer nunca sobrescribe un
+archivo ajeno con ese nombre y conserva los symlinks de la configuracion.
 
 Comandos utiles:
 
 ```bash
 wispr-flow --fix-shortcut  # repara un atajo Fn heredado de macOS
-wispr-flow --flow-bar on   # muestra la barra (puede interceptar clics)
-wispr-flow --flow-bar off
+wispr-flow --flow-bar on   # muestra una barra compacta persistente
+wispr-flow --flow-bar off  # muestra Status solo durante el dictado
+wispr-flow --show          # trae Flow Hub al workspace actual
+wispr-flow --hide          # envia Flow Hub a special:wispr-flow
+wispr-flow --background    # inicia y deja Flow listo sin Hub visible
+wispr-flow --status        # cuenta Electron principal y helper
+wispr-flow --stop          # cierre limpio; termina solo esta instalacion
+wispr-flow --reset-input   # recuperacion segura ante entrada atascada
+wispr-flow --autostart on
+wispr-flow --autostart off
 wispr-flow --logs
 ```
 
-Para probar las ventanas Wayland nativas:
+Para forzar temporalmente otro backend:
 
 ```bash
-WISPR_FLOW_NATIVE_WAYLAND=1 wispr-flow
+WISPR_FLOW_BACKEND=wayland wispr-flow
+WISPR_FLOW_BACKEND=x11 wispr-flow
+WISPR_FLOW_BACKEND=auto wispr-flow
+```
+
+`--stop` y `--reset-input` identifican procesos por la ruta exacta de sus
+ejecutables, intentan primero el cierre limpio, escalan a `TERM`/`KILL` solo si
+es necesario y comprueban que desaparezca el teclado virtual de Wispr. No usan
+`pkill` por nombre ni reinician Hyprland.
+
+Para ocultar Status por completo y usar Wayland nativo en una ejecucion:
+
+```bash
+WISPR_FLOW_TRANSIENT_STATUS_WINDOW=0 wispr-flow
+```
+
+## Helper corregido y reproducible
+
+El helper upstream `v0.1.2` restauraba mediante `key-down` virtual los
+modificadores fisicos que encontraba pulsados al pegar. Como el helper no recibe
+necesariamente el futuro `key-up` fisico, Ctrl, Shift, Alt o Super podian quedar
+atascados. Ademas, un error intermedio podia saltarse parte de la limpieza.
+
+`patches/helper/uinput.rs` cambia esa politica: libera todas las teclas
+virtuales aunque haya errores y nunca restaura virtualmente un modificador
+fisico. `patches/helper/terminal-paste.patch` detecta la clase de la ventana
+activa en Hyprland para usar el acorde de pegado correcto. El binario incluido
+procede exactamente de:
+
+```text
+Repositorio: https://github.com/wispr-flow-linux/helper.git
+Commit:      fa93fcf31d9ee7a9591a8dce1852f815d1b0dec5
+Rust:        1.96.0
+SHA-256:     5f069506ccf51964f05ba6b06b7a1bfbb42cd2a5d64437c965abba628c4b45b0
+```
+
+Para reproducirlo, usa Rust `1.96.0`; el script clona el commit, verifica el
+archivo upstream y los parches, ejecuta 13 tests, `clippy`, build release y exige
+el mismo SHA antes de escribir el resultado:
+
+```bash
+./scripts/build-helper.sh /tmp/wispr-flow-linux-helper
 ```
 
 ## Seguridad
@@ -199,6 +278,10 @@ La instalacion de usuario sin sandbox SUID esta disponible solo como fallback:
 ./install.sh --user
 ```
 
+La instalacion conserva `~/.config/Wispr Flow/`, incluidas sesion y preferencias.
+No compartas ese directorio ni `~/.cache/wispr-flow/launcher.log`: pueden contener
+informacion privada de cuenta, aplicaciones usadas o dictados.
+
 ## Desinstalar
 
 ```bash
@@ -206,16 +289,27 @@ La instalacion de usuario sin sandbox SUID esta disponible solo como fallback:
 ./uninstall.sh --purge  # tambien borra sesion local, preferencias y cache
 ```
 
+El desinstalador detiene primero los procesos por ruta exacta, retira reglas
+Hyprland/autostart, elimina la regla udev y revoca los ACL creados. Si esta
+version del instalador fue quien anadio tu usuario al grupo `input`, tambien lo
+retira; una membresia preexistente o heredada de una version antigua se conserva
+por seguridad. Tras retirar una membresia debes cerrar la sesion para que deje de
+estar activa en procesos ya iniciados.
+
 ## Verificacion
 
 ```bash
 ./tests/smoke.sh
 ```
 
-La prueba real realizada durante el desarrollo confirmo: Electron nativo,
-version `1.6.447`, 138 migraciones SQLite, helper Linux listo y AudioContext
-inicializado. La captura y el pegado global deben validarse en tu sesion real de
-Hyprland, porque el entorno automatizado disponible no es tu escritorio Arch.
+La prueba real realizada durante el desarrollo confirmo: Electron bajo
+XWayland con Status transitorio,
+version `1.6.447`, ASAR extraible sin referencias Windows rotas, helper Linux
+reproducible, una sola instancia, Hub oculto en el workspace especial y cierre
+sin procesos ni teclado virtual restantes. La prueba final de entrada requiere
+dictar en tu sesion real: completa al menos 20 ciclos PTT, incluyendo cancelar
+uno y detener Flow durante una prueba controlada, y confirma que ningun
+modificador queda activo.
 
 ## Fuentes
 
