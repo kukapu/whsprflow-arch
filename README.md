@@ -31,17 +31,22 @@ sesion si cambia el acceso a dispositivos, completar el login de Wispr,
 seleccionar el microfono y realizar la validacion final de dictado. Una
 configuracion Hyprland en Lua tampoco se modifica automaticamente.
 
-### Ruta 2: AUR (preparada, pero aun no publicada)
+### Ruta 2: AUR
 
-El futuro paquete se llamara `wispr-flow-hyprland`. **Todavia no esta publicado
-en AUR**: faltan fijar el commit publico del repositorio de soporte y su hash, y
-completar la validacion final. Cuando se publique, la ruta sera:
+El paquete `wispr-flow-hyprland` esta publicado en
+<https://aur.archlinux.org/packages/wispr-flow-hyprland>. En una instalacion
+nueva, la ruta completa es:
 
 ```bash
 yay -S wispr-flow-hyprland
 wispr-flow --setup
 wispr-flow --doctor
 ```
+
+El paquete descarga el cliente directamente desde Wispr, verifica todos los
+hashes y construye localmente el mismo runtime parcheado. `pacman` gestiona sus
+archivos, actualizaciones y desinstalacion; el login, microfono y preferencias
+siguen siendo propios de cada usuario y equipo.
 
 `wispr-flow --setup` se ejecuta como el usuario normal, nunca con `sudo`. Crea o
 repara una configuracion Linux valida, oculta Flow Bar en Hyprland, registra el
@@ -52,6 +57,12 @@ El paquete AUR existente `wispr-flow-appimage` tambien proporciona y entra en
 conflicto con `wispr-flow`. Por ello no puede instalarse a la vez que
 `wispr-flow-hyprland`: hay que escoger una de las dos variantes. Este proyecto
 no usa `replaces`, por lo que el cambio nunca se realiza silenciosamente.
+
+Si esta maquina ya se instalo mediante `./install.sh`, no superpongas ambas
+rutas. Desde el repositorio ejecuta primero `./uninstall.sh` **sin** `--purge` y
+despues instala el paquete AUR. Asi se conservan la cuenta y preferencias de
+`~/.config/Wispr Flow/`, pero `pacman` pasa a ser el unico propietario de los
+archivos del sistema.
 
 ## Que necesitas copiar para la ruta del repositorio
 
