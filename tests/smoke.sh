@@ -17,11 +17,14 @@ pkgbuild="$aur_dir/PKGBUILD"
 bash -n "$pkgbuild"
 bash -n "$aur_dir/wispr-flow-hyprland.install"
 
-placeholder='TO_BE_''PINNED'
+support_commit='091bcb9dcac2221be3d007d56eb98704e2407d61'
+support_sha256='a26c0b35682176888dbd9229b997e7aa69f05c7301d167612bd4a1d777714884'
 bash -c '
 	set -Eeuo pipefail
+	CARCH=x86_64
 	source "$1"
-	placeholder="$2"
+	support_commit="$2"
+	support_sha256="$3"
 	[[ $pkgname == wispr-flow-hyprland ]]
 	[[ $pkgver == 1.6.447 && $pkgrel == 1 ]]
 	[[ ${arch[*]} == x86_64 ]]
@@ -30,20 +33,21 @@ bash -c '
 	[[ ${provides[*]} == "wispr-flow=1.6.447" ]]
 	[[ ${conflicts[*]} == wispr-flow ]]
 	[[ -z ${replaces+x} ]]
-	[[ ${options[*]} == !strip ]]
+	[[ ${options[*]} == "!strip !debug" ]]
 	[[ $install == wispr-flow-hyprland.install ]]
-	[[ $_support_commit == "$placeholder" ]]
-	[[ ${sha256sums[0]} == "$placeholder" ]]
+	[[ $_support_commit == "$support_commit" ]]
+	[[ ${sha256sums[0]} == "$support_sha256" ]]
 	[[ ${#source[@]} -eq ${#sha256sums[@]} ]]
 	[[ ${noextract[*]} == "WisprFlow-1.6.447-full.nupkg electron-v42.3.0-linux-x64.zip" ]]
-	for dependency in hicolor-icon-theme hyprland libcups libgcc libstdc++ pango; do
+	for dependency in hicolor-icon-theme hyprland libcups libgcc libstdc++ nodejs pango; do
 		[[ " ${depends[*]} " == *" $dependency "* ]]
 	done
-	for dependency in asar nodejs perl python unzip; do
+	for dependency in asar perl python unzip; do
 		[[ " ${makedepends[*]} " == *" $dependency "* ]]
 	done
+	[[ " ${makedepends[*]} " != *" nodejs "* ]]
 	[[ ${optdepends[*]} == uwsm:* ]]
-' _ "$pkgbuild" "$placeholder"
+' _ "$pkgbuild" "$support_commit" "$support_sha256"
 
 pkg_functions="$(bash -c 'source "$1"; declare -f build package' _ "$pkgbuild")"
 if grep -Eiq '(^|[^[:alnum:]_])(sudo|pacman|curl|wget)([^[:alnum:]_]|$)|git[[:space:]]+clone|/usr/local|/home/|\$\{?HOME' \
@@ -56,15 +60,12 @@ grep -qF '"$srcdir/' <<< "$pkg_functions"
 ! grep -qF '/opt/' <<< "$(bash -c 'source "$1"; declare -f build' _ "$pkgbuild")"
 ! grep -qF '/usr/local' "$pkgbuild"
 ! grep -qF '/home/' "$pkgbuild"
-[[ ! -e $aur_dir/.SRCINFO ]]
-
-mapfile -t placeholder_hits < <(
-	grep -R -I -n --exclude-dir=.git --exclude='wispr-flow-linux-helper-x86_64' \
-		-- "$placeholder" "$root"
-)
-[[ ${#placeholder_hits[@]} -eq 2 ]]
-[[ ${placeholder_hits[0]} == "$pkgbuild:"* ]]
-[[ ${placeholder_hits[1]} == "$pkgbuild:"* ]]
+placeholder='TO_BE_''PINNED'
+if grep -R -I -q --exclude-dir=.git --exclude='wispr-flow-linux-helper-x86_64' \
+		-- "$placeholder" "$root"; then
+	printf 'ERROR: quedan placeholders del pin AUR.\n' >&2
+	exit 1
+fi
 
 sha256sum "$aur_dir/wispr-flow.desktop" \
 	| grep -q '^3b65d10698a9c944c5494cfd9a5fa3f04dd7b5a02f8fce0ace9333b6f1646ba5 '
@@ -77,6 +78,8 @@ fi
 
 if command -v makepkg >/dev/null 2>&1; then
 	srcinfo="$(cd "$aur_dir" && makepkg --printsrcinfo)"
+	[[ -f $aur_dir/.SRCINFO ]]
+	cmp -s <(printf '%s\n' "$srcinfo") "$aur_dir/.SRCINFO"
 	grep -qxF 'pkgbase = wispr-flow-hyprland' <<< "$srcinfo"
 	grep -qxF 'pkgname = wispr-flow-hyprland' <<< "$srcinfo"
 	grep -qxF $'\tprovides = wispr-flow=1.6.447' <<< "$srcinfo"
