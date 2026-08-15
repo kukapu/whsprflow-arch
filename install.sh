@@ -288,6 +288,6 @@ printf 'Diagnostico:  wispr-flow --doctor\n'
 printf 'Inicio:       wispr-flow\n'
 if $hide_bar; then
 	"$configurer_target" hyprland-rules on
-	printf 'Hyprland:     Hub flotante y Status visible solo durante el dictado.\n'
+	printf 'Hyprland:     Hub flotante centrado; indicador de grabacion transitorio (Wayland nativo).\n'
 fi
 printf '\nSi el diagnostico no puede leer /dev/input, cierra sesion y vuelve a entrar.\n'

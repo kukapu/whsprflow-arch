@@ -18,6 +18,11 @@ start_sound_marker = "WISPR_LINUX_LOCAL_START_SOUND"
 stop_sound_marker = "WISPR_LINUX_LOCAL_STOP_SOUND"
 compact_status_marker = "WISPR_LINUX_COMPACT_STATUS_WINDOW"
 transient_hide_marker = "WISPR_LINUX_TRANSIENT_STATUS_HIDE"
+status_zoom_marker = "WISPR_LINUX_STATUS_ZOOM"
+status_geometry_marker = "WISPR_LINUX_STATUS_GEOMETRY"
+status_interactive_marker = "WISPR_LINUX_STATUS_INTERACTIVE"
+status_hittest_marker = "WISPR_LINUX_STATUS_HITTEST"
+status_tour_marker = "WISPR_LINUX_STATUS_TOUR"
 
 markers = (
     show_marker,
@@ -26,6 +31,11 @@ markers = (
     stop_sound_marker,
     compact_status_marker,
     transient_hide_marker,
+    status_zoom_marker,
+    status_geometry_marker,
+    status_interactive_marker,
+    status_hittest_marker,
+    status_tour_marker,
 )
 markers_present = [marker in source for marker in markers]
 if all(markers_present):
@@ -130,16 +140,110 @@ if patched.count(compact_anchor) != 1:
     raise SystemExit(
         f"ERROR: expected one status-window bounds anchor, found {patched.count(compact_anchor)}"
     )
+zoom_expr = 'process.env.WISPR_FLOW_STATUS_ZOOM?parseFloat(process.env.WISPR_FLOW_STATUS_ZOOM):1.45'
+height_expr = (
+    '"1"===process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW?96:'
+    f'/*{status_geometry_marker}*/(process.env.WISPR_FLOW_STATUS_H?+process.env.WISPR_FLOW_STATUS_H:'
+    f'Math.round(570*({zoom_expr})))'
+)
+width_expr = (
+    f'/*{compact_status_marker}*/"1"===process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW?180:'
+    '(process.env.WISPR_FLOW_STATUS_W?+process.env.WISPR_FLOW_STATUS_W:'
+    f'Math.round(480*({zoom_expr})))'
+)
 patched = patched.replace(
     compact_anchor,
-    'A.tD,A.H8,'
-    + f'/*{compact_status_marker}*/"1"===process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW?96:570,'
-    + 'u,"1"===process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW?180:480),ne=',
+    'A.tD,A.H8,' + height_expr + ',u,' + width_expr + '),ne=',
+    1,
+)
+
+zoom_prefs_anchor = (
+    'webPreferences:{...m.g,preload:require("path").resolve(__dirname,'
+    '"../renderer","status","preload.js"),backgroundThrottling:!1}'
+)
+if patched.count(zoom_prefs_anchor) != 1:
+    raise SystemExit(
+        f"ERROR: expected one status webPreferences anchor, found {patched.count(zoom_prefs_anchor)}"
+    )
+patched = patched.replace(
+    zoom_prefs_anchor,
+    zoom_prefs_anchor[:-1]
+    + f',/*{status_zoom_marker}*/zoomFactor:process.env.WISPR_FLOW_STATUS_ZOOM'
+    '?parseFloat(process.env.WISPR_FLOW_STATUS_ZOOM)'
+    ':("1"===process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW?1:1.45)}',
+    1,
+)
+
+interactive_create_anchor = (
+    'n.setAlwaysOnTop(!0,"screen-saver"),n.setIgnoreMouseEvents(!0,{forward:!0}),'
+    'A.tD&&n.setVisibleOnAllWorkspaces'
+)
+if patched.count(interactive_create_anchor) != 1:
+    raise SystemExit(
+        f"ERROR: expected one status ignore-mouse anchor, found {patched.count(interactive_create_anchor)}"
+    )
+patched = patched.replace(
+    interactive_create_anchor,
+    'n.setAlwaysOnTop(!0,"screen-saver"),'
+    f'/*{status_interactive_marker}*/"1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&'
+    'n.setIgnoreMouseEvents(!0,{forward:!0}),A.tD&&n.setVisibleOnAllWorkspaces',
+    1,
+)
+
+interactive_ipc_anchor = ':V()?.setIgnoreMouseEvents(!0,{forward:!0}),(0,h.cA)(x.RA.statusWindow)'
+if patched.count(interactive_ipc_anchor) != 1:
+    raise SystemExit(
+        f"ERROR: expected one status EnableMouseEvents anchor, found {patched.count(interactive_ipc_anchor)}"
+    )
+patched = patched.replace(
+    interactive_ipc_anchor,
+    ':("1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&V()?.setIgnoreMouseEvents(!0,{forward:!0}),'
+    '(0,h.cA)(x.RA.statusWindow))',
+    1,
+)
+
+position_anchor = 'return{x:c+(h-o)/2,y:u+m-s,width:o,height:s}'
+if patched.count(position_anchor) != 1:
+    raise SystemExit(
+        f"ERROR: expected one status geometry return anchor, found {patched.count(position_anchor)}"
+    )
+patched = patched.replace(
+    position_anchor,
+    'return{x:c+(h-o)/2,y:u+m-s,width:o,height:s,'
+    f'...(/*{status_geometry_marker}*/"1"===process.env.WISPR_FLOW_TRANSIENT_STATUS_WINDOW&&'
+    '"1"!==process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW'
+    '?{y:Math.round(u+m*parseFloat(process.env.WISPR_FLOW_STATUS_Y||"0.83")-s/2)}:{})}',
+    1,
+)
+
+hittest_anchor = 'O=(t,n)=>{v()&&A===n&&!e.isDestroyed()&&e.setIgnoreMouseEvents(t,{forward:!0})}'
+if patched.count(hittest_anchor) != 1:
+    raise SystemExit(
+        f"ERROR: expected one alpha hit-test poller anchor, found {patched.count(hittest_anchor)}"
+    )
+patched = patched.replace(
+    hittest_anchor,
+    'O=(t,n)=>{v()&&A===n&&!e.isDestroyed()&&'
+    f'/*{status_hittest_marker}*/(!t||"1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE)&&'
+    'e.setIgnoreMouseEvents(t,{forward:!0})}',
+    1,
+)
+
+tour_anchor = 'x.RA.statusWindow&&!x.RA.statusWindow.isDestroyed()&&x.RA.statusWindow.setIgnoreMouseEvents(!0,{forward:!0})'
+if patched.count(tour_anchor) != 1:
+    raise SystemExit(
+        f"ERROR: expected one feature-tour suspend anchor, found {patched.count(tour_anchor)}"
+    )
+patched = patched.replace(
+    tour_anchor,
+    'x.RA.statusWindow&&!x.RA.statusWindow.isDestroyed()&&'
+    f'/*{status_tour_marker}*/"1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&'
+    'x.RA.statusWindow.setIgnoreMouseEvents(!0,{forward:!0})',
     1,
 )
 
 path.write_text(patched, encoding="utf-8", errors="surrogateescape")
-print("Patched: Status guards, compact bounds, and local dictation sounds")
+print("Patched: Status guards, geometry, zoom, interactivity, local dictation sounds")
 PY
 
 grep -qF 'WISPR_LINUX_HIDE_STATUS_WINDOW_SHOW' "$bundle"
@@ -148,4 +252,9 @@ grep -qF 'WISPR_LINUX_LOCAL_START_SOUND' "$bundle"
 grep -qF 'WISPR_LINUX_LOCAL_STOP_SOUND' "$bundle"
 grep -qF 'WISPR_LINUX_COMPACT_STATUS_WINDOW' "$bundle"
 grep -qF 'WISPR_LINUX_TRANSIENT_STATUS_HIDE' "$bundle"
+grep -qF 'WISPR_LINUX_STATUS_ZOOM' "$bundle"
+grep -qF 'WISPR_LINUX_STATUS_GEOMETRY' "$bundle"
+grep -qF 'WISPR_LINUX_STATUS_INTERACTIVE' "$bundle"
+grep -qF 'WISPR_LINUX_STATUS_HITTEST' "$bundle"
+grep -qF 'WISPR_LINUX_STATUS_TOUR' "$bundle"
 node --check "$bundle"

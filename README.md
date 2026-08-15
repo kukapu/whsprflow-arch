@@ -28,8 +28,9 @@ ensambla el runtime y hace la integracion de sistema y de usuario.
 Siguen siendo especificos de cada maquina y usuario: disponer de una sesion
 Hyprland activa, acceso a `sudo` y red durante la instalacion, volver a iniciar
 sesion si cambia el acceso a dispositivos, completar el login de Wispr,
-seleccionar el microfono y realizar la validacion final de dictado. Una
-configuracion Hyprland en Lua tampoco se modifica automaticamente.
+seleccionar el microfono y realizar la validacion final de dictado. La
+integracion automatica soporta tanto `hyprland.conf` como la entrada Lua
+`hyprland.lua` de Hyprland >= 0.55 (Omarchy 4).
 
 ### Ruta 2: AUR
 
@@ -165,9 +166,10 @@ pedira `sudo` solamente para las operaciones que lo necesitan.
    - instala el comando `/usr/local/bin/wispr-flow`;
    - registra el protocolo de login `wispr-flow:` y la entrada del menu;
    - configura `Ctrl+Shift` como push-to-talk si no existe un atajo valido;
-   - muestra Status solo mientras graba o procesa y lo oculta al terminar;
+   - usa Wayland nativo con indicador de grabacion transitorio en Hyprland;
    - reproduce localmente los sonidos de inicio y fin si estan habilitados;
-   - instala reglas reversibles para que Flow Hub sea flotante y centrado;
+   - instala reglas reversibles para que Flow Hub sea flotante y centrado,
+     en `hyprland.lua` (sesiones Lua) o `hyprland.conf`;
    - instala las reglas udev para `/dev/uinput` y los teclados;
    - anade tu usuario al grupo `input` si todavia no pertenece a el y registra
      que esa membresia fue creada por este instalador.
@@ -257,12 +259,31 @@ El perfil, la sesion y las preferencias se guardan en
 
 ## Hyprland y segundo plano
 
-Electron 42 no implementa `setIgnoreMouseEvents()` en Wayland nativo. Por eso el
-wrapper usa XWayland cuando Status es visible o transitorio. Con Flow Bar
-desactivada, el parche mantiene Status oculto en reposo, lo muestra durante la
-grabacion y el procesamiento, y vuelve a ocultarlo en `Idle`, `Error` o
-`Dismissed`. El helper sigue usando las APIs Wayland para portapapeles, entrada
-global e inyeccion de teclas.
+Electron 42 no implementa `setIgnoreMouseEvents()` en Wayland nativo, pero eso
+solo afecta a la Flow Bar persistente. Con Flow Bar desactivada, el default en
+Hyprland es Wayland nativo con el indicador de grabacion como ventana
+transitoria: aparece al dictar, se desmapea en `Idle`, `Error` o `Dismissed`
+(sin superficie invisible que capture clics en reposo) y escala correctamente
+con el monitor. Solo con `--flow-bar on` el wrapper pasa a XWayland para
+mantener el click-through de la barra. El helper sigue usando las APIs Wayland
+para portapapeles, entrada global e inyeccion de teclas. Para ocultar tambien
+el indicador durante la grabacion:
+
+```bash
+WISPR_FLOW_TRANSIENT_STATUS_WINDOW=0 wispr-flow
+```
+
+El indicador transitorio conserva el click-through original de la app
+(`setIgnoreMouseEvents` de Electron 42; su `forward` solo funciona en X11, por
+lo que los botones del menu no responden en Wayland nativo). Se puede ajustar
+su geometria con variables de entorno: `WISPR_FLOW_STATUS_ZOOM` (escala, por
+defecto `1.45`), `WISPR_FLOW_STATUS_Y` (fraccion de altura de pantalla para
+el centro de la ventana, por defecto `0.83`, deja el pill a un sexto del borde
+inferior), `WISPR_FLOW_STATUS_W`/`WISPR_FLOW_STATUS_H` (tamaño absoluto en px)
+y `WISPR_FLOW_STATUS_CLICKABLE=1` para probar el modo interactivo
+experimental. La posicion se aplica en la propia funcion de geometria de la
+app, de modo que el reposicionamiento periodico durante el dictado la
+respeta.
 
 Los sonidos de inicio y fin se envian al renderer local y respetan la opcion de
 sonidos de Flow. Al pegar, el helper usa `Ctrl+V` normalmente y
@@ -270,17 +291,21 @@ sonidos de Flow. Al pegar, el helper usa `Ctrl+V` normalmente y
 incluido Warp.
 
 Las reglas gestionadas solo coinciden con clase `wispr-flow` y titulo `Hub` o
-`Flow Hub`. No afectan las ventanas Status, Context Menu ni Scratchpad. Se
-guardan en `~/.config/hypr/wispr-flow.conf`; el configurer nunca sobrescribe un
-archivo ajeno con ese nombre y conserva los symlinks de la configuracion.
+`Flow Hub`. No afectan las ventanas Status, Context Menu ni Scratchpad. En
+sesiones Lua se guardan en `~/.config/hypr/wispr-flow.lua` y se cargan con un
+bloque `dofile` gestionado en `hyprland.lua`; en sesiones `.conf` siguen en
+`~/.config/hypr/wispr-flow.conf`. El configurer nunca sobrescribe un archivo
+ajeno con esos nombres y conserva los symlinks de la configuracion. Los
+comandos `--show`, `--hide` y `--background` usan la sintaxis de dispatch Lua
+en Hyprland >= 0.55 y la clasica en versiones anteriores.
 
 Comandos utiles:
 
 ```bash
 wispr-flow --setup         # configuracion inicial para paquetes del sistema
 wispr-flow --fix-shortcut  # repara un atajo Fn heredado de macOS
-wispr-flow --flow-bar on   # muestra una barra compacta persistente
-wispr-flow --flow-bar off  # muestra Status solo durante el dictado
+wispr-flow --flow-bar on   # barra compacta persistente (usa XWayland)
+wispr-flow --flow-bar off  # indicador de grabacion transitorio (Wayland nativo)
 wispr-flow --show          # trae Flow Hub al workspace actual
 wispr-flow --hide          # envia Flow Hub a special:wispr-flow
 wispr-flow --background    # inicia y deja Flow listo sin Hub visible
@@ -300,16 +325,10 @@ WISPR_FLOW_BACKEND=x11 wispr-flow
 WISPR_FLOW_BACKEND=auto wispr-flow
 ```
 
-`--stop` y `--reset-input` identifican procesos por la ruta exacta de sus
-ejecutables, intentan primero el cierre limpio, escalan a `TERM`/`KILL` solo si
-es necesario y comprueban que desaparezca el teclado virtual de Wispr. No usan
-`pkill` por nombre ni reinician Hyprland.
-
-Para ocultar Status por completo y usar Wayland nativo en una ejecucion:
-
-```bash
-WISPR_FLOW_TRANSIENT_STATUS_WINDOW=0 wispr-flow
-```
+ `--stop` y `--reset-input` identifican procesos por la ruta exacta de sus
+ ejecutables, intentan primero el cierre limpio, escalan a `TERM`/`KILL` solo si
+ es necesario y comprueban que desaparezca el teclado virtual de Wispr. No usan
+ `pkill` por nombre ni reinician Hyprland.
 
 ## Helper corregido y reproducible
 

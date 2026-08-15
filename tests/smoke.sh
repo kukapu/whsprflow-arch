@@ -249,13 +249,74 @@ HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
 	"$root/bin/wispr-flow-configure" autostart off
 ! grep -qF 'whsprflow-arch' "$tmp/config/hypr/autostart.conf"
 
+printf '%s\n' '-- entrada lua de prueba' > "$tmp/config/hypr/hyprland.lua"
+
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules on
+grep -qxF -- '-- >>> whsprflow-arch rules >>>' "$tmp/config/hypr/hyprland.lua"
+grep -qF "dofile(\"$tmp/config/hypr/wispr-flow.lua\")" "$tmp/config/hypr/hyprland.lua"
+grep -qF 'match = { class = "^wispr-flow$", title = "^(Flow )?Hub$" }' \
+	"$tmp/config/hypr/wispr-flow.lua"
+grep -qF 'size = { 1350, 850 }' "$tmp/config/hypr/wispr-flow.lua"
+grep -qF 'border_size = 0' "$tmp/config/hypr/wispr-flow.lua"
+
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules check
+
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules off
+! grep -qF 'whsprflow-arch' "$tmp/config/hypr/hyprland.lua"
+[[ ! -e $tmp/config/hypr/wispr-flow.lua ]]
+
+cat > "$tmp/config/hypr/hyprland.conf" <<'EOF'
+# >>> whsprflow-arch rules >>>
+source = wispr-flow.conf
+# <<< whsprflow-arch rules <<<
+EOF
+printf '%s\n' '# Managed by whsprflow-arch. Only the real Flow Hub is affected.' \
+	'windowrule = float on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$' \
+	> "$tmp/config/hypr/wispr-flow.conf"
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules on
+! grep -qF 'whsprflow-arch' "$tmp/config/hypr/hyprland.conf"
+[[ ! -e $tmp/config/hypr/wispr-flow.conf ]]
+[[ -f $tmp/config/hypr/wispr-flow.lua ]]
+
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	"$root/bin/wispr-flow-configure" autostart on
+grep -qF 'hl.exec_cmd("uwsm-app -- wispr-flow --background")' "$tmp/config/hypr/hyprland.lua"
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	"$root/bin/wispr-flow-configure" autostart status
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
+	"$root/bin/wispr-flow-configure" autostart off
+! grep -qF 'whsprflow-arch' "$tmp/config/hypr/hyprland.lua"
+
+HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+	"$root/bin/wispr-flow-configure" hyprland-rules off
+
+printf '%s\n' '-- reglas propias del usuario' > "$tmp/config/hypr/wispr-flow.lua"
+if HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
+		"$root/bin/wispr-flow-configure" hyprland-rules on 2>/dev/null; then
+	printf 'ERROR: las reglas Lua ajenas no deben sobrescribirse.\n' >&2
+	exit 1
+fi
+grep -qxF -- '-- reglas propias del usuario' "$tmp/config/hypr/wispr-flow.lua"
+rm -f "$tmp/config/hypr/wispr-flow.lua" "$tmp/config/hypr/hyprland.lua" \
+	"$tmp/config/hypr/hyprland.conf"
+
 cat > "$tmp/main.js" <<'EOF'
 const G=()=>{const e=x.RA.statusWindow;e.showInactive(),a().info("Showing status window")};
 Ye=(e=v.H8)=>{const t=ne.RA.statusWindow;if(!t||t.isDestroyed())return a().error("Status window is not available or destroyed. Recreating."),void(ne.RA.statusWindow=W());const n=t.isAlwaysOnTop(),r=t.isVisible();if(n&&r)e&&(t.setAlwaysOnTop(!0,"screen-saver"),t.showInactive());else{t.setAlwaysOnTop(!0,"screen-saver"),t.showInactive()}};
 const start=e=>{(()=>{(0,ee.ui)(!0)})(e),ke(O._W.Listening),foo()};
 const stop=e=>{ke(O._W.Stopping),Ve(e),foo()};
 const te=e=>foo(e,A.tD,A.H8,570,u,480),ne=1;
+const teInner=e=>{const{x:c,y:u,width:h,height:m}=p(e,t,r,i);return{x:c+(h-o)/2,y:u+m-s,width:o,height:s}};
 const status=e=>{p.ZZ.status=e,p.ZZ.statusLastUpdatedTime=Date.now();const s=foo()};
+const W=()=>{const e=i.screen.getDisplayNearestPoint(i.screen.getCursorScreenPoint()),t=te(e),n=new i.BrowserWindow({show:!1,webPreferences:{...m.g,preload:require("path").resolve(__dirname,"../renderer","status","preload.js"),backgroundThrottling:!1}},...t)};
+const A1=n=>{n.setAlwaysOnTop(!0,"screen-saver"),n.setIgnoreMouseEvents(!0,{forward:!0}),A.tD&&n.setVisibleOnAllWorkspaces(!0,{vi:1})};
+const ipc1=e=>{K||(e?Z(x.RA.statusWindow):V()?.setIgnoreMouseEvents(!0,{forward:!0}),(0,h.cA)(x.RA.statusWindow))};
+const O=(t,n)=>{v()&&A===n&&!e.isDestroyed()&&e.setIgnoreMouseEvents(t,{forward:!0})};
+const J=()=>{K||(K=!0,X(),x.RA.statusWindow&&!x.RA.statusWindow.isDestroyed()&&x.RA.statusWindow.setIgnoreMouseEvents(!0,{forward:!0}))};
 EOF
 "$root/patches/linux-runtime-fixes.sh" "$tmp/main.js"
 "$root/patches/linux-runtime-fixes.sh" "$tmp/main.js"
@@ -267,7 +328,20 @@ grep -qF '"1"===process.env.WISPR_FLOW_TRANSIENT_STATUS_WINDOW&&ne.RA.statusWind
 grep -qF 'WISPR_LINUX_LOCAL_STOP_SOUND' "$tmp/main.js"
 grep -qF 'WISPR_LINUX_COMPACT_STATUS_WINDOW' "$tmp/main.js"
 grep -qF 'WISPR_LINUX_TRANSIENT_STATUS_HIDE' "$tmp/main.js"
-[[ $(grep -o 'WISPR_LINUX_' "$tmp/main.js" | wc -l) -eq 6 ]]
+grep -qF 'WISPR_LINUX_STATUS_ZOOM' "$tmp/main.js"
+grep -qF 'zoomFactor:process.env.WISPR_FLOW_STATUS_ZOOM' "$tmp/main.js"
+grep -qF 'WISPR_LINUX_STATUS_GEOMETRY' "$tmp/main.js"
+grep -qF 'WISPR_FLOW_STATUS_Y||"0.83"' "$tmp/main.js"
+grep -qF '?{y:Math.round(u+m*parseFloat(process.env.WISPR_FLOW_STATUS_Y||"0.83")-s/2)}:{}' "$tmp/main.js"
+grep -qF 'WISPR_LINUX_STATUS_INTERACTIVE' "$tmp/main.js"
+grep -qF '"1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&n.setIgnoreMouseEvents' "$tmp/main.js"
+grep -qF 'WISPR_LINUX_STATUS_HITTEST' "$tmp/main.js"
+grep -qF '(!t||"1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE)&&e.setIgnoreMouseEvents(t' "$tmp/main.js"
+grep -qF 'WISPR_LINUX_STATUS_TOUR' "$tmp/main.js"
+grep -qF '"1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&x.RA.statusWindow.setIgnoreMouseEvents' "$tmp/main.js"
+grep -qF ':("1"===process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW?1:1.45)}' "$tmp/main.js"
+grep -qF 'WISPR_FLOW_STATUS_ZOOM):1.45' "$tmp/main.js"
+[[ $(grep -o 'WISPR_LINUX_' "$tmp/main.js" | wc -l) -eq 12 ]]
 
 mkdir -p "$tmp/app/usr/lib/wispr-flow/resources/Release" "$tmp/fake-bin" "$tmp/home"
 cat > "$tmp/app/usr/lib/wispr-flow/launcher-common.sh" <<'EOF'
@@ -367,6 +441,8 @@ TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron.out" HOME="$tmp/home" \
 grep -qxF 'wayland=unset' "$tmp/electron.out"
 grep -qxF 'args=' "$tmp/electron.out"
 
+jq '.prefs.user.hideFlowBarPermanently = false' "$config" > "$tmp/bar-config.json"
+mv "$tmp/bar-config.json" "$config"
 TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron-x11.out" HOME="$tmp/home" \
 	XDG_CONFIG_HOME="$tmp/config" XDG_CURRENT_DESKTOP=Hyprland WAYLAND_DISPLAY=wayland-test \
 	WISPR_FLOW_INSTALL_ROOT="$tmp/app" "$root/bin/wispr-flow"
@@ -374,16 +450,24 @@ grep -qF -- '--ozone-platform=x11' "$tmp/electron-x11.out"
 
 jq '.prefs.user.hideFlowBarPermanently = true' "$config" > "$tmp/hidden-config.json"
 mv "$tmp/hidden-config.json" "$config"
-TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron-transient.out" HOME="$tmp/home" \
+TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron-wayland.out" HOME="$tmp/home" \
 	XDG_CONFIG_HOME="$tmp/config" XDG_CURRENT_DESKTOP=Hyprland WAYLAND_DISPLAY=wayland-test \
 	WISPR_FLOW_INSTALL_ROOT="$tmp/app" "$root/bin/wispr-flow"
-grep -qF -- '--ozone-platform=x11' "$tmp/electron-transient.out"
+grep -qxF 'wayland=1' "$tmp/electron-wayland.out"
+grep -qF -- '--wayland-test' "$tmp/electron-wayland.out"
 
-TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron-wayland.out" HOME="$tmp/home" \
+TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron-transient.out" HOME="$tmp/home" \
+	XDG_CONFIG_HOME="$tmp/config" XDG_CURRENT_DESKTOP=Hyprland WAYLAND_DISPLAY=wayland-test \
+	WISPR_FLOW_INSTALL_ROOT="$tmp/app" WISPR_FLOW_TRANSIENT_STATUS_WINDOW=1 \
+	"$root/bin/wispr-flow"
+grep -qxF 'wayland=1' "$tmp/electron-transient.out"
+grep -qF -- '--wayland-test' "$tmp/electron-transient.out"
+
+TMPDIR="$tmp" WISPR_TEST_OUTPUT="$tmp/electron-no-status.out" HOME="$tmp/home" \
 	XDG_CONFIG_HOME="$tmp/config" XDG_CURRENT_DESKTOP=Hyprland WAYLAND_DISPLAY=wayland-test \
 	WISPR_FLOW_INSTALL_ROOT="$tmp/app" WISPR_FLOW_TRANSIENT_STATUS_WINDOW=0 \
 	"$root/bin/wispr-flow"
-grep -qxF 'wayland=1' "$tmp/electron-wayland.out"
-grep -qF -- '--wayland-test' "$tmp/electron-wayland.out"
+grep -qxF 'wayland=1' "$tmp/electron-no-status.out"
+grep -qF -- '--wayland-test' "$tmp/electron-no-status.out"
 
 printf 'Smoke tests OK\n'

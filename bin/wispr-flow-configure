@@ -8,12 +8,18 @@ hypr_dir="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
 hypr_main="$hypr_dir/hyprland.conf"
 hypr_lua="$hypr_dir/hyprland.lua"
 hypr_rules="$hypr_dir/wispr-flow.conf"
+hypr_rules_lua="$hypr_dir/wispr-flow.lua"
 hypr_autostart="$hypr_dir/autostart.conf"
 rules_start='# >>> whsprflow-arch rules >>>'
 rules_end='# <<< whsprflow-arch rules <<<'
+lua_rules_start='-- >>> whsprflow-arch rules >>>'
+lua_rules_end='-- <<< whsprflow-arch rules <<<'
 autostart_start='# >>> whsprflow-arch autostart >>>'
 autostart_end='# <<< whsprflow-arch autostart <<<'
+lua_autostart_start='-- >>> whsprflow-arch autostart >>>'
+lua_autostart_end='-- <<< whsprflow-arch autostart <<<'
 rules_owner='# Managed by whsprflow-arch. Only the real Flow Hub is affected.'
+rules_owner_lua='-- Managed by whsprflow-arch. Only the real Flow Hub is affected.'
 
 die() {
 	printf 'ERROR: %s\n' "$*" >&2
@@ -87,11 +93,15 @@ shortcut_label() {
 	esac
 }
 
-require_hypr_conf() {
-	if [[ -f $hypr_lua && ! -f $hypr_main ]]; then
-		die 'Esta sesion usa hyprland.lua; la integracion automatica solo modifica la configuracion .conf detectada y no sobrescribira Lua.'
+hypr_entry_mode() {
+	# Hyprland >= 0.55 prefiere hyprland.lua cuando ambos existen.
+	if [[ -f $hypr_lua ]]; then
+		printf 'lua'
+	elif [[ -f $hypr_main ]]; then
+		printf 'conf'
+	else
+		die "No existe $hypr_lua ni $hypr_main."
 	fi
-	[[ -f $hypr_main ]] || die "No existe $hypr_main."
 }
 
 remove_managed_block() {
@@ -144,13 +154,14 @@ managed_block_present() {
 }
 
 validate_rules_file() {
-	[[ -e $hypr_rules || -L $hypr_rules ]] || return 0
-	[[ ! -L $hypr_rules ]] \
-		|| die "$hypr_rules es un enlace simbolico ajeno; no se modifica."
+	local file="$1" owner="$2"
+	[[ -e $file || -L $file ]] || return 0
+	[[ ! -L $file ]] \
+		|| die "$file es un enlace simbolico ajeno; no se modifica."
 	local first=''
-	IFS= read -r first < "$hypr_rules" || true
-	[[ $first == "$rules_owner" ]] \
-		|| die "$hypr_rules ya existe y no pertenece a whsprflow-arch; no se modifica."
+	IFS= read -r first < "$file" || true
+	[[ $first == "$owner" ]] \
+		|| die "$file ya existe y no pertenece a whsprflow-arch; no se modifica."
 }
 
 reload_hyprland() {
@@ -163,16 +174,59 @@ reload_hyprland() {
 	[[ -z $errors ]] || die "Hyprland rechazo la configuracion:\n$errors"
 }
 
+write_lua_rules_file() {
+	local tmp
+	tmp="$(mktemp "${hypr_rules_lua}.XXXXXX")"
+	cat > "$tmp" <<'EOF'
+-- Managed by whsprflow-arch. Only the real Flow Hub is affected.
+hl.window_rule({
+	match = { class = "^wispr-flow$", title = "^(Flow )?Hub$" },
+	float = true,
+	center = true,
+	size = { 1350, 850 },
+	persistent_size = true,
+	no_shortcuts_inhibit = true,
+})
+
+hl.window_rule({
+	match = { class = "^wispr-flow$", title = "^(Status|Flow Status Indicator)$" },
+	float = true,
+	no_focus = true,
+	no_follow_mouse = true,
+	no_shortcuts_inhibit = true,
+	border_size = 0,
+})
+EOF
+	mv "$tmp" "$hypr_rules_lua"
+	chmod 0644 "$hypr_rules_lua"
+}
+
+remove_all_rule_artifacts() {
+	remove_managed_block "$hypr_main" "$rules_start" "$rules_end"
+	remove_managed_block "$hypr_lua" "$lua_rules_start" "$lua_rules_end"
+	rm -f "$hypr_rules" "$hypr_rules_lua"
+}
+
 configure_hyprland_rules() {
+	local mode tmp
 	case "${1:-}" in
 		on)
-			require_hypr_conf
+			mode="$(hypr_entry_mode)"
 			mkdir -p "$hypr_dir"
-			validate_rules_file
-			remove_managed_block "$hypr_main" "$rules_start" "$rules_end"
-			local tmp
-			tmp="$(mktemp "${hypr_rules}.XXXXXX")"
-			cat > "$tmp" <<EOF
+			validate_rules_file "$hypr_rules" "$rules_owner"
+			validate_rules_file "$hypr_rules_lua" "$rules_owner_lua"
+			remove_all_rule_artifacts
+			if [[ $mode == lua ]]; then
+				write_lua_rules_file
+				cat >> "$hypr_lua" <<EOF
+
+$lua_rules_start
+dofile("$hypr_rules_lua")
+$lua_rules_end
+EOF
+			else
+				tmp="$(mktemp "${hypr_rules}.XXXXXX")"
+				cat > "$tmp" <<EOF
 $rules_owner
 windowrule = float on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
 windowrule = center on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
@@ -185,63 +239,89 @@ windowrule = no_follow_mouse on, match:class ^wispr-flow$, match:title ^(Status|
 windowrule = no_shortcuts_inhibit on, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$
 windowrule = border_size 0, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$
 EOF
-			mv "$tmp" "$hypr_rules"
-			chmod 0644 "$hypr_rules"
-			cat >> "$hypr_main" <<EOF
+				mv "$tmp" "$hypr_rules"
+				chmod 0644 "$hypr_rules"
+				cat >> "$hypr_main" <<EOF
 
 $rules_start
 source = $hypr_rules
 $rules_end
 EOF
+			fi
 			reload_hyprland
-			printf 'Reglas de Hyprland instaladas para Flow Hub.\n'
+			printf 'Reglas de Hyprland instaladas para Flow Hub (entrada %s).\n' "$mode"
 			;;
 		off)
-			validate_rules_file
-			remove_managed_block "$hypr_main" "$rules_start" "$rules_end"
-			rm -f "$hypr_rules"
+			validate_rules_file "$hypr_rules" "$rules_owner"
+			validate_rules_file "$hypr_rules_lua" "$rules_owner_lua"
+			remove_all_rule_artifacts
 			reload_hyprland
 			printf 'Reglas de Hyprland eliminadas.\n'
 			;;
 		check)
-			validate_rules_file
-			[[ -f $hypr_rules ]] && managed_block_present "$hypr_main" "$rules_start" "$rules_end"
+			mode="$(hypr_entry_mode)"
+			validate_rules_file "$hypr_rules" "$rules_owner"
+			validate_rules_file "$hypr_rules_lua" "$rules_owner_lua"
+			if [[ $mode == lua ]]; then
+				[[ -f $hypr_rules_lua ]] \
+					&& managed_block_present "$hypr_lua" "$lua_rules_start" "$lua_rules_end"
+			else
+				[[ -f $hypr_rules ]] \
+					&& managed_block_present "$hypr_main" "$rules_start" "$rules_end"
+			fi
 			;;
 		*) die 'Uso: wispr-flow --hyprland-rules on|off' ;;
 	esac
 }
 
 configure_autostart() {
-	local rc
+	local rc mode
 	case "${1:-}" in
 		on)
-			require_hypr_conf
 			command -v uwsm-app >/dev/null 2>&1 || die "Omarchy no tiene 'uwsm-app'."
+			mode="$(hypr_entry_mode)"
 			mkdir -p "$hypr_dir"
 			touch "$hypr_autostart"
 			remove_managed_block "$hypr_autostart" "$autostart_start" "$autostart_end"
-			cat >> "$hypr_autostart" <<EOF
+			remove_managed_block "$hypr_lua" "$lua_autostart_start" "$lua_autostart_end"
+			if [[ $mode == lua ]]; then
+				cat >> "$hypr_lua" <<EOF
+
+$lua_autostart_start
+hl.on("hyprland.start", function()
+	hl.exec_cmd("uwsm-app -- wispr-flow --background")
+end)
+$lua_autostart_end
+EOF
+				printf 'Autostart activado en %s.\n' "$hypr_lua"
+			else
+				cat >> "$hypr_autostart" <<EOF
 
 $autostart_start
 exec-once = uwsm-app -- wispr-flow --background
 $autostart_end
 EOF
-			printf 'Autostart activado en %s.\n' "$hypr_autostart"
+				printf 'Autostart activado en %s.\n' "$hypr_autostart"
+			fi
 			;;
 		off)
 			remove_managed_block "$hypr_autostart" "$autostart_start" "$autostart_end"
+			remove_managed_block "$hypr_lua" "$lua_autostart_start" "$lua_autostart_end"
 			printf 'Autostart desactivado.\n'
 			;;
 		status)
-			if managed_block_present "$hypr_autostart" "$autostart_start" "$autostart_end"; then
+			local present=1
+			rc=0; managed_block_present "$hypr_autostart" "$autostart_start" "$autostart_end" || rc=$?
+			((rc == 2)) && die "Los marcadores gestionados de $hypr_autostart estan incompletos o duplicados."
+			((rc == 0)) && present=0
+			rc=0; managed_block_present "$hypr_lua" "$lua_autostart_start" "$lua_autostart_end" || rc=$?
+			((rc == 2)) && die "Los marcadores gestionados de $hypr_lua estan incompletos o duplicados."
+			((rc == 0)) && present=0
+			if ((present == 0)); then
 				printf 'Autostart: activado\n'
 			else
-				rc=$?
-				if ((rc == 1)); then
-					printf 'Autostart: desactivado\n'
-					return 1
-				fi
-				die "Los marcadores gestionados de $hypr_autostart estan incompletos o duplicados."
+				printf 'Autostart: desactivado\n'
+				return 1
 			fi
 			;;
 		*) die 'Uso: wispr-flow --autostart on|off|status' ;;

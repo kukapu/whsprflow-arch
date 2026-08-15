@@ -161,6 +161,35 @@ dispatch_hyprland() {
 	fi
 }
 
+hyprland_has_lua_dispatch() {
+	local tag major minor
+	tag="$(hyprctl version 2>/dev/null | sed -n 's/^Tag: v\([0-9]*\)\.\([0-9]*\).*/\1 \2/p' | head -1)"
+	[[ -n $tag ]] || return 1
+	read -r major minor <<< "$tag"
+	((major > 0)) || ((minor >= 55))
+}
+
+move_window_silent() {
+	local workspace="$1" address="$2"
+	if hyprland_has_lua_dispatch; then
+		dispatch_hyprland \
+			"hl.dsp.window.move({ workspace = \"$workspace\", window = \"address:$address\", follow = false })" \
+			|| return 1
+	else
+		dispatch_hyprland movetoworkspacesilent "$workspace,address:$address" || return 1
+	fi
+}
+
+focus_window() {
+	local address="$1"
+	if hyprland_has_lua_dispatch; then
+		dispatch_hyprland "hl.dsp.focus({ window = \"address:$address\" })" \
+			|| return 1
+	else
+		dispatch_hyprland focuswindow "address:$address" || return 1
+	fi
+}
+
 hub_is_in_workspace() {
 	local address="$1" expected="$2"
 	hyprctl clients -j | jq -e --arg address "$address" --arg expected "$expected" '
@@ -204,12 +233,12 @@ show_hub() {
 		printf 'ERROR: Flow Hub no aparecio en Hyprland. Revisa wispr-flow --logs.\n' >&2
 		return 1
 	}
-	dispatch_hyprland movetoworkspacesilent "$workspace,address:$address" || return 1
+	move_window_silent "$workspace" "$address" || return 1
 	wait_for_hub_workspace "$address" "$workspace" || {
 		printf 'ERROR: Flow Hub no llego al workspace %s.\n' "$workspace" >&2
 		return 1
 	}
-	dispatch_hyprland focuswindow "address:$address" || return 1
+	focus_window "$address" || return 1
 	printf 'Flow Hub visible en el workspace %s.\n' "$workspace"
 }
 
@@ -221,7 +250,7 @@ hide_hub() {
 		printf 'Flow Hub ya esta oculto o aun no se ha creado.\n'
 		return 0
 	fi
-	dispatch_hyprland movetoworkspacesilent "special:wispr-flow,address:$address" || return 1
+	move_window_silent 'special:wispr-flow' "$address" || return 1
 	wait_for_hub_workspace "$address" 'special:wispr-flow' || {
 		printf 'ERROR: Flow Hub no llego al workspace especial wispr-flow.\n' >&2
 		return 1
@@ -379,6 +408,11 @@ if [[ -z ${WISPR_FLOW_HIDE_STATUS_WINDOW+x} ]] \
 		&& jq -e '.prefs.user.hideFlowBarPermanently == true' "$config_file" >/dev/null; then
 	export WISPR_FLOW_HIDE_STATUS_WINDOW=1
 fi
+# En Hyprland con Flow Bar oculta, el indicador de grabacion se muestra como
+# ventana transitoria durante el dictado y se desmapea en reposo. En Wayland
+# nativo rinde correctamente (XWayland bajo Hyprland >= 0.55 lo pintaba
+# invisible y dejaba una superficie que capturaba clics) y escala con el
+# monitor. WISPR_FLOW_TRANSIENT_STATUS_WINDOW=0 lo oculta por completo.
 if [[ ${WISPR_FLOW_HIDE_STATUS_WINDOW:-0} == 1 ]] \
 		&& [[ ${XDG_CURRENT_DESKTOP,,} == *hyprland* ]] \
 		&& [[ -z ${WISPR_FLOW_TRANSIENT_STATUS_WINDOW+x} ]]; then
@@ -397,10 +431,10 @@ elif [[ -z $backend && ${WISPR_USE_WAYLAND:-0} == 1 ]]; then
 	backend='wayland'
 elif [[ -z $backend && -n ${WAYLAND_DISPLAY:-} \
 		&& ${XDG_CURRENT_DESKTOP,,} == *hyprland* ]]; then
-	# Native Wayland is used when Status is hidden. A visible Flow Bar uses
-	# XWayland because Electron 42 only supports click-through there.
-	if [[ ${WISPR_FLOW_HIDE_STATUS_WINDOW:-0} == 1 \
-			&& ${WISPR_FLOW_TRANSIENT_STATUS_WINDOW:-0} != 1 ]]; then
+	# Flow Hub and the transient dictation indicator render correctly on
+	# native Wayland and scale with the monitor. Only a persistent Flow Bar
+	# needs XWayland: Electron 42 click-through works there alone.
+	if [[ ${WISPR_FLOW_HIDE_STATUS_WINDOW:-0} == 1 ]]; then
 		backend='wayland'
 	else
 		backend='x11'
@@ -435,8 +469,9 @@ fi
 
 build_electron_args "$package_type"
 
-# A transient or persistent Status window uses XWayland because Electron 42
-# lacks native Wayland click-through. Fully hidden Status can use Wayland.
+# A persistent Flow Bar uses XWayland because Electron 42 lacks native Wayland
+# click-through. The transient dictation indicator stays on native Wayland:
+# it only exists while recording and unmapps itself when idle.
 if $force_xwayland; then
 	electron_args+=('--ozone-platform=x11')
 	log_message 'Forcing XWayland UI; Linux helper remains on Wayland'
