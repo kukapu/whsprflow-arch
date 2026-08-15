@@ -17,8 +17,8 @@ pkgbuild="$aur_dir/PKGBUILD"
 bash -n "$pkgbuild"
 bash -n "$aur_dir/wispr-flow-hyprland.install"
 
-support_commit='091bcb9dcac2221be3d007d56eb98704e2407d61'
-support_sha256='a26c0b35682176888dbd9229b997e7aa69f05c7301d167612bd4a1d777714884'
+support_commit='71ea2acdf0588b7aa58b69d459a3857e12ce3a7f'
+support_sha256='c701c97a9bb2640dec3b93b58c042479a2d266d800a4f28425371e447ebbe4f1'
 bash -c '
 	set -Eeuo pipefail
 	CARCH=x86_64
@@ -26,7 +26,7 @@ bash -c '
 	support_commit="$2"
 	support_sha256="$3"
 	[[ $pkgname == wispr-flow-hyprland ]]
-	[[ $pkgver == 1.6.447 && $pkgrel == 1 ]]
+	[[ $pkgver == 1.6.447 && $pkgrel == 2 ]]
 	[[ ${arch[*]} == x86_64 ]]
 	[[ $url == https://github.com/kukapu/whsprflow-arch ]]
 	[[ ${license[*]} == "0BSD AND BSD-3-Clause AND LicenseRef-Proprietary AND MIT AND Unlicense" ]]
