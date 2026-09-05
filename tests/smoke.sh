@@ -8,6 +8,7 @@ trap 'rm -rf "$tmp"' EXIT
 
 for script in "$root/install.sh" "$root/uninstall.sh" "$root/bin/wispr-flow" \
 	"$root/bin/wispr-flow-configure" "$root/patches/linux-runtime-fixes.sh" \
+	"$root/patches/helper-env-fallback.sh" \
 	"$root/scripts/assemble-app.sh" "$root/scripts/build-helper.sh"; do
 	bash -n "$script"
 done
@@ -26,11 +27,11 @@ bash -c '
 	support_commit="$2"
 	support_sha256="$3"
 	[[ $pkgname == wispr-flow-hyprland ]]
-	[[ $pkgver == 1.6.447 && $pkgrel == 2 ]]
+	[[ $pkgver == 1.6.774 && $pkgrel == 1 ]]
 	[[ ${arch[*]} == x86_64 ]]
 	[[ $url == https://github.com/kukapu/whsprflow-arch ]]
 	[[ ${license[*]} == "0BSD AND BSD-3-Clause AND LicenseRef-Proprietary AND MIT AND Unlicense" ]]
-	[[ ${provides[*]} == "wispr-flow=1.6.447" ]]
+	[[ ${provides[*]} == "wispr-flow=1.6.774" ]]
 	[[ ${conflicts[*]} == wispr-flow ]]
 	[[ -z ${replaces+x} ]]
 	[[ ${options[*]} == "!strip !debug" ]]
@@ -38,7 +39,7 @@ bash -c '
 	[[ $_support_commit == "$support_commit" ]]
 	[[ ${sha256sums[0]} == "$support_sha256" ]]
 	[[ ${#source[@]} -eq ${#sha256sums[@]} ]]
-	[[ ${noextract[*]} == "WisprFlow-1.6.447-full.nupkg electron-v42.3.0-linux-x64.zip" ]]
+	[[ ${noextract[*]} == "WisprFlow-1.6.774-full.nupkg electron-v42.3.0-linux-x64.zip" ]]
 	for dependency in hicolor-icon-theme hyprland libcups libgcc libstdc++ nodejs pango; do
 		[[ " ${depends[*]} " == *" $dependency "* ]]
 	done
@@ -82,7 +83,7 @@ if command -v makepkg >/dev/null 2>&1; then
 	cmp -s <(printf '%s\n' "$srcinfo") "$aur_dir/.SRCINFO"
 	grep -qxF 'pkgbase = wispr-flow-hyprland' <<< "$srcinfo"
 	grep -qxF 'pkgname = wispr-flow-hyprland' <<< "$srcinfo"
-	grep -qxF $'\tprovides = wispr-flow=1.6.447' <<< "$srcinfo"
+	grep -qxF $'\tprovides = wispr-flow=1.6.774' <<< "$srcinfo"
 	grep -qxF $'\tconflicts = wispr-flow' <<< "$srcinfo"
 	! grep -q 'replaces = ' <<< "$srcinfo"
 fi

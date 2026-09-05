@@ -1,6 +1,6 @@
 # Wispr Flow en Arch Linux / Hyprland
 
-Este proyecto construye **Wispr Flow 1.6.447** para Linux a partir del paquete
+Este proyecto construye **Wispr Flow 1.6.774** para Linux a partir del paquete
 oficial de Windows. No es una reimplementacion de Whisper ni usa Wine: conserva
 el cliente Electron, el login, la cuenta Pro y los servicios cloud de Wispr, y
 sustituye solo la integracion Win32 por un helper Linux de codigo abierto.
@@ -88,6 +88,7 @@ whsprflow-arch/
 |   |-- helper/
 |   |   |-- terminal-paste.patch
 |   |   `-- uinput.rs
+|   |-- helper-env-fallback.sh
 |   `-- linux-runtime-fixes.sh
 |-- scripts/
 |   |-- assemble-app.sh
@@ -156,7 +157,7 @@ pedira `sudo` solamente para las operaciones que lo necesitan.
 
    - instala las dependencias de Arch, incluidos `asar`, XWayland y
      `wl-clipboard`;
-   - descarga el cliente oficial de Wispr Flow `1.6.447`;
+   - descarga el cliente oficial de Wispr Flow `1.6.774`;
    - descarga Electron Linux `42.3.0`;
    - usa el helper Linux abierto `0.1.2`, parcheado desde el commit fijado;
    - descarga el modulo SQLite Linux compatible;
@@ -198,7 +199,7 @@ paquetes JavaScript.
 
    ```text
    ==> Instalacion terminada
-   Version:      1.6.447
+   Version:      1.6.774
    Tipo:         system
    Ejecutable:   /usr/local/bin/wispr-flow
    ```
@@ -398,7 +399,7 @@ estar activa en procesos ya iniciados.
 
 La prueba real realizada durante el desarrollo confirmo: Electron bajo
 XWayland con Status transitorio,
-version `1.6.447`, ASAR extraible sin referencias Windows rotas, helper Linux
+version `1.6.774`, ASAR extraible sin referencias Windows rotas, helper Linux
 reproducible, una sola instancia, Hub oculto en el workspace especial y cierre
 sin procesos ni teclado virtual restantes. La prueba final de entrada requiere
 dictar en tu sesion real: completa al menos 20 ciclos PTT, incluyendo cancelar

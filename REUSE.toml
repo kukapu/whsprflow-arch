@@ -10,6 +10,7 @@ path = [
   "scripts/**",
   "tests/**",
   "patches/linux-runtime-fixes.sh",
+  "patches/helper-env-fallback.sh",
   "packaging/**",
 ]
 precedence = "override"
