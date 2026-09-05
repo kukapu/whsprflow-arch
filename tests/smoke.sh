@@ -18,8 +18,8 @@ pkgbuild="$aur_dir/PKGBUILD"
 bash -n "$pkgbuild"
 bash -n "$aur_dir/wispr-flow-hyprland.install"
 
-support_commit='71ea2acdf0588b7aa58b69d459a3857e12ce3a7f'
-support_sha256='c701c97a9bb2640dec3b93b58c042479a2d266d800a4f28425371e447ebbe4f1'
+support_commit='d092cfb3344715fcd794091feea9b1dd678df26b'
+support_sha256='e7433c7291a1828da4572cbfb1e93d7bbe754400bf17a90fbbd1385e599f545c'
 bash -c '
 	set -Eeuo pipefail
 	CARCH=x86_64
