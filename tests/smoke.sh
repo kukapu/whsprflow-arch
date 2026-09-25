@@ -22,8 +22,8 @@ pkgbuild="$aur_dir/PKGBUILD"
 bash -n "$pkgbuild"
 bash -n "$aur_dir/wispr-flow-hyprland.install"
 
-support_commit='d092cfb3344715fcd794091feea9b1dd678df26b'
-support_sha256='e7433c7291a1828da4572cbfb1e93d7bbe754400bf17a90fbbd1385e599f545c'
+support_commit='e1a7ce49e5ff1fe965415fd81f5239c467e3667f'
+support_sha256='5e0171d79eb67bad6495af7bf51214de095b6b9cbdcd421c7209b66a9f182e31'
 bash -c '
 	set -Eeuo pipefail
 	CARCH=x86_64
@@ -31,11 +31,11 @@ bash -c '
 	support_commit="$2"
 	support_sha256="$3"
 	[[ $pkgname == wispr-flow-hyprland ]]
-	[[ $pkgver == 1.6.774 && $pkgrel == 1 ]]
+	[[ $pkgver == 1.6.957 && $pkgrel == 1 ]]
 	[[ ${arch[*]} == x86_64 ]]
 	[[ $url == https://github.com/kukapu/whsprflow-arch ]]
 	[[ ${license[*]} == "0BSD AND BSD-3-Clause AND LicenseRef-Proprietary AND MIT AND Unlicense" ]]
-	[[ ${provides[*]} == "wispr-flow=1.6.774" ]]
+	[[ ${provides[*]} == "wispr-flow=1.6.957" ]]
 	[[ ${conflicts[*]} == wispr-flow ]]
 	[[ -z ${replaces+x} ]]
 	[[ ${options[*]} == "!strip !debug" ]]
@@ -43,7 +43,7 @@ bash -c '
 	[[ $_support_commit == "$support_commit" ]]
 	[[ ${sha256sums[0]} == "$support_sha256" ]]
 	[[ ${#source[@]} -eq ${#sha256sums[@]} ]]
-	[[ ${noextract[*]} == "WisprFlow-1.6.774-full.nupkg electron-v42.3.0-linux-x64.zip" ]]
+	[[ ${noextract[*]} == "WisprFlow-1.6.957-full.nupkg electron-v42.3.0-linux-x64.zip" ]]
 	for dependency in hicolor-icon-theme hyprland libcups libgcc libstdc++ nodejs pango; do
 		[[ " ${depends[*]} " == *" $dependency "* ]]
 	done
@@ -88,7 +88,7 @@ if command -v makepkg >/dev/null 2>&1; then
 	cmp -s <(printf '%s\n' "$srcinfo") "$aur_dir/.SRCINFO"
 	grep -qxF 'pkgbase = wispr-flow-hyprland' <<< "$srcinfo"
 	grep -qxF 'pkgname = wispr-flow-hyprland' <<< "$srcinfo"
-	grep -qxF $'\tprovides = wispr-flow=1.6.774' <<< "$srcinfo"
+	grep -qxF $'\tprovides = wispr-flow=1.6.957' <<< "$srcinfo"
 	grep -qxF $'\tconflicts = wispr-flow' <<< "$srcinfo"
 	! grep -q 'replaces = ' <<< "$srcinfo"
 fi

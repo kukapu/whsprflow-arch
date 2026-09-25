@@ -34,10 +34,10 @@ integracion automatica soporta tanto `hyprland.conf` como la entrada Lua
 
 ### Ruta 2: AUR
 
-La receta publicada en `packaging/aur/` corresponde a **1.6.774-1**. La
-actualizacion **1.6.957** se construye de momento desde este repositorio con
-`install.sh`; publicar la nueva receta AUR requiere primero publicar y fijar
-el commit de soporte que contiene los nuevos parches.
+La receta publicada en `packaging/aur/` corresponde a **1.6.957-1** y fija el
+soporte al commit `e1a7ce49e5ff1fe965415fd81f5239c467e3667f`, verificado con
+la instalacion local. El paquete incluye la deteccion del nuevo titulo
+`Wispr Flow` en Hyprland y conserva la limitacion de interaccion del indicador.
 
 El paquete `wispr-flow-hyprland` esta publicado en
 <https://aur.archlinux.org/packages/wispr-flow-hyprland>. En una instalacion
@@ -415,6 +415,11 @@ Verificacion de 1.6.957 realizada el 25 de septiembre de 2026:
 - arranque Wayland durante 25 segundos con perfil temporal: 157 migraciones,
   helper listo, backend Wayland y contexto de audio en estado `running`;
 - cierre con SIGTERM al proceso principal, codigo de salida 0.
+
+El paquete AUR **1.6.957-1** tambien se construyo con `makepkg --noconfirm`
+desde las fuentes publicadas, verificando todos los SHA-256 y ejecutando
+`check()`. El ASAR resultante coincide byte a byte con la instalacion local
+verificada. Esta comprobacion construye el paquete, sin instalarlo.
 
 La instalacion del sistema se verifico con `wispr-flow --doctor`, recarga de
 Hyprland sin errores, mostrar/ocultar Hub, arranque en segundo plano y cierre
