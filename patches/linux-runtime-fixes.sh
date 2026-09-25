@@ -49,16 +49,24 @@ patched = source
 # Bundle flavour: Wispr 1.6.447 uses (0,ee.ui)/ke(O._W)/ne.RA/V.Bn/E.Y6 and
 # 570x480 status bounds; 1.6.774 renamed them to (0,ne.ui)/qe(O._W)/ie.RA/
 # K.Bn/_.Y6 with 586x512 bounds and factored the helper env into N().
+# 1.6.957 uses ie.RA/K.Bn/E.Y6, 614x512 bounds and a new status module.
 OLD_START_ANCHOR = '(0,ee.ui)(!0)})(e),ke(O._W.Listening),'
 NEW_START_ANCHOR = '(0,ne.ui)(!0)})(e),e===O.SB.BLE&&qe(O._W.Listening),'
+LATEST_START_ANCHOR = '(0,ne.ui)(!0)})(e),e===_.SB.BLE&&qe(_._W.Listening),'
 old_flavour = OLD_START_ANCHOR in patched
 new_flavour = NEW_START_ANCHOR in patched
-if old_flavour == new_flavour:
+latest_flavour = LATEST_START_ANCHOR in patched
+if sum((old_flavour, new_flavour, latest_flavour)) != 1:
     raise SystemExit(
         "ERROR: cannot determine bundle flavour "
-        f"(old_start={old_flavour} new_start={new_flavour})"
+        f"(old_start={old_flavour} new_start={new_flavour} latest_start={latest_flavour})"
     )
-if new_flavour:
+if latest_flavour:
+    NEW_START_ANCHOR = LATEST_START_ANCHOR
+    RA_MOD = 'ie.RA'
+    BN_MOD = 'K.Bn'
+    Y_MOD = 'E.Y6'
+elif new_flavour:
     RA_MOD = 'ie.RA'
     BN_MOD = 'K.Bn'
     Y_MOD = '_.Y6'
@@ -104,13 +112,17 @@ else:
         'e.setAlwaysOnTop(!0,"screen-saver")),ge(ie),'
         'o().info("Showing status window")'
     )
+    if latest_flavour:
+        show_anchor_new = (
+            'e.showInactive(),O.H8&&(re||ie(e),'
+            'e.setAlwaysOnTop(!0,"screen-saver")),ve(ce),'
+            'o().info("Showing status window")'
+        )
     replace_once(
         show_anchor_new,
         '(/*' + show_marker + '*/"1"===process.env.WISPR_FLOW_HIDE_STATUS_WINDOW?'
         '(e.hide(),o().info("Linux: Flow Status Indicator kept hidden")):'
-        '(e.showInactive(),y.H8&&(J||ee(e),'
-        'e.setAlwaysOnTop(!0,"screen-saver")),ge(ie),'
-        'o().info("Showing status window")))',
+        '(' + show_anchor_new + '))',
         'Flow Status Indicator show site',
     )
 
@@ -163,16 +175,24 @@ else:
     )
 
 transient_hide_anchor = 'p.ZZ.status=e,p.ZZ.statusLastUpdatedTime=Date.now();const s='
+if latest_flavour:
+    transient_hide_anchor = (
+        'p.ZZ.status=e,e===_._W.Dismissed&&(p.ZZ.wasDismissed=!0),'
+        'p.ZZ.statusLastUpdatedTime=Date.now();const s='
+    )
+status_enum = '_._W' if latest_flavour else 'O._W'
 replace_once(
     transient_hide_anchor,
-    'p.ZZ.status=e,p.ZZ.statusLastUpdatedTime=Date.now(),'
+    transient_hide_anchor.removesuffix(';const s=') + ','
     + f'/*{transient_hide_marker}*/"1"===process.env.WISPR_FLOW_TRANSIENT_STATUS_WINDOW&&'
-    + f'[O._W.Idle,O._W.Error,O._W.Dismissed].includes(e)&&{RA_MOD}.statusWindow?.hide();const s=',
+    + f'[{status_enum}.Idle,{status_enum}.Error,{status_enum}.Dismissed].includes(e)&&{RA_MOD}.statusWindow?.hide();const s=',
     'terminal-status hide',
 )
 
 OLD_STOP_ANCHOR = 'ke(O._W.Stopping),Ve(e),'
 NEW_STOP_ANCHOR = 'qe(O._W.Stopping),nt(e),'
+if latest_flavour:
+    NEW_STOP_ANCHOR = 'qe(_._W.Stopping),rt(e),'
 if old_flavour:
     replace_once(
         OLD_STOP_ANCHOR,
@@ -184,9 +204,10 @@ if old_flavour:
 else:
     replace_once(
         NEW_STOP_ANCHOR,
-        'qe(O._W.Stopping),'
+        f'qe({status_enum}.Stopping),'
         + f'/*{stop_sound_marker}*/{RA_MOD}.prefs?.user.enableSounds&&'
-        + f'(0,{BN_MOD})({RA_MOD}.hubWindow,{Y_MOD}.PlayDictationStopSound),nt(e),',
+        + f'(0,{BN_MOD})({RA_MOD}.hubWindow,{Y_MOD}.PlayDictationStopSound),'
+        + ('rt(e),' if latest_flavour else 'nt(e),'),
         'dictation-stop sound',
     )
 
@@ -203,6 +224,12 @@ else:
     compact_anchor = 'y.tD,y.H8,586,u,512),Se='
     compact_suffix = '),Se='
     compact_prefix = 'y.tD,y.H8,'
+if latest_flavour:
+    base_height = '614'
+    base_width = '512'
+    compact_anchor = 'O.tD,O.H8,614,f,512),Te='
+    compact_suffix = '),Te='
+    compact_prefix = 'O.tD,O.H8,'
 height_expr = (
     '"1"===process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW?96:'
     f'/*{status_geometry_marker}*/(process.env.WISPR_FLOW_STATUS_H?+process.env.WISPR_FLOW_STATUS_H:'
@@ -215,13 +242,18 @@ width_expr = (
 )
 replace_once(
     compact_anchor,
-    compact_prefix + height_expr + ',u,' + width_expr + compact_suffix,
+    compact_prefix + height_expr + (',f,' if latest_flavour else ',u,') + width_expr + compact_suffix,
     'status-window bounds',
 )
 
 if old_flavour:
     zoom_prefs_anchor = (
         'webPreferences:{...m.g,preload:require("path").resolve(__dirname,'
+        '"../renderer","status","preload.js"),backgroundThrottling:!1}'
+    )
+elif latest_flavour:
+    zoom_prefs_anchor = (
+        'webPreferences:{...v.g,preload:require("path").resolve(__dirname,'
         '"../renderer","status","preload.js"),backgroundThrottling:!1}'
     )
 else:
@@ -250,6 +282,20 @@ if old_flavour:
         'n.setIgnoreMouseEvents(!0,{forward:!0}),A.tD&&n.setVisibleOnAllWorkspaces',
         'status ignore-mouse',
     )
+elif latest_flavour:
+    interactive_create_anchor = (
+        'r.setAlwaysOnTop(!0,"screen-saver"),'
+        'O.H8?H.replaceWindow(r):r.setIgnoreMouseEvents(!0,{forward:!0}),'
+        'O.tD&&r.setVisibleOnAllWorkspaces'
+    )
+    replace_once(
+        interactive_create_anchor,
+        'r.setAlwaysOnTop(!0,"screen-saver"),'
+        'O.H8?H.replaceWindow(r):('
+        f'/*{status_interactive_marker}*/"1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&'
+        'r.setIgnoreMouseEvents(!0,{forward:!0})),O.tD&&r.setVisibleOnAllWorkspaces',
+        'status ignore-mouse',
+    )
 else:
     interactive_create_anchor = (
         'n.setAlwaysOnTop(!0,"screen-saver"),'
@@ -274,6 +320,14 @@ if old_flavour:
         '(0,h.cA)(x.RA.statusWindow))',
         'status EnableMouseEvents',
     )
+elif latest_flavour:
+    interactive_ipc_anchor = ':ee()?.setIgnoreMouseEvents(!0,{forward:!0}),(0,y.cA)(u.RA.statusWindow)'
+    replace_once(
+        interactive_ipc_anchor,
+        ':("1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&ee()?.setIgnoreMouseEvents(!0,{forward:!0}),'
+        '(0,y.cA)(u.RA.statusWindow))',
+        'status EnableMouseEvents',
+    )
 else:
     interactive_ipc_anchor = ':Y()?.setIgnoreMouseEvents(!0,{forward:!0}),(0,m.cA)(P.RA.statusWindow)'
     replace_once(
@@ -291,6 +345,16 @@ if old_flavour:
         f'...(/*{status_geometry_marker}*/"1"===process.env.WISPR_FLOW_TRANSIENT_STATUS_WINDOW&&'
         '"1"!==process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW'
         '?{y:Math.round(u+m*parseFloat(process.env.WISPR_FLOW_STATUS_Y||"0.83")-s/2)}:{})}',
+        'status geometry return',
+    )
+elif latest_flavour:
+    position_anchor = 'return{x:c+(u-a)/2,y:l+d-s,width:a,height:s}'
+    replace_once(
+        position_anchor,
+        'return{x:c+(u-a)/2,y:l+d-s,width:a,height:s,'
+        f'...(/*{status_geometry_marker}*/"1"===process.env.WISPR_FLOW_TRANSIENT_STATUS_WINDOW&&'
+        '"1"!==process.env.WISPR_FLOW_COMPACT_STATUS_WINDOW'
+        '?{y:Math.round(l+d*parseFloat(process.env.WISPR_FLOW_STATUS_Y||"0.83")-s/2)}:{})}',
         'status geometry return',
     )
 else:
@@ -318,9 +382,14 @@ else:
         'M=(t,n)=>{v()&&f===n&&!e.isDestroyed()&&'
         '(t?e.setIgnoreMouseEvents(!0,{forward:!0}):e.setIgnoreMouseEvents(!1))}'
     )
+    if latest_flavour:
+        hittest_anchor = (
+            'C=(t,n)=>{z()&&v===n&&!e.isDestroyed()&&'
+            '(t?e.setIgnoreMouseEvents(!0,{forward:!0}):e.setIgnoreMouseEvents(!1))}'
+        )
     replace_once(
         hittest_anchor,
-        'M=(t,n)=>{v()&&f===n&&!e.isDestroyed()&&'
+        hittest_anchor.split('(t?')[0] +
         f'/*{status_hittest_marker}*/(!t||"1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE)&&'
         '(t?e.setIgnoreMouseEvents(!0,{forward:!0}):e.setIgnoreMouseEvents(!1))}',
         'alpha hit-test poller',
@@ -341,13 +410,22 @@ else:
         'P.RA.statusWindow&&!P.RA.statusWindow.isDestroyed()&&'
         'P.RA.statusWindow.setIgnoreMouseEvents(!0,{forward:!0})'
     )
+    if latest_flavour:
+        tour_anchor = (
+            'O.H8?ee()?.setIgnoreMouseEvents(!0,{forward:!0}):'
+            'u.RA.statusWindow&&!u.RA.statusWindow.isDestroyed()&&'
+            'u.RA.statusWindow.setIgnoreMouseEvents(!0,{forward:!0})'
+        )
+    tour_platform = 'O.H8' if latest_flavour else 'y.H8'
+    tour_window = 'ee()' if latest_flavour else 'Y()'
+    tour_state = 'u.RA' if latest_flavour else 'P.RA'
     replace_once(
         tour_anchor,
-        'y.H8?("1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&'
-        'Y()?.setIgnoreMouseEvents(!0,{forward:!0})):'
-        'P.RA.statusWindow&&!P.RA.statusWindow.isDestroyed()&&'
+        f'{tour_platform}?("1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&'
+        f'{tour_window}?.setIgnoreMouseEvents(!0,{{forward:!0}})):'
+        f'{tour_state}.statusWindow&&!{tour_state}.statusWindow.isDestroyed()&&'
         f'/*{status_tour_marker}*/"1"!==process.env.WISPR_FLOW_STATUS_CLICKABLE&&'
-        'P.RA.statusWindow.setIgnoreMouseEvents(!0,{forward:!0})',
+        f'{tour_state}.statusWindow.setIgnoreMouseEvents(!0,{{forward:!0}})',
         'feature-tour suspend',
     )
 

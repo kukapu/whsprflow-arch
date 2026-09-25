@@ -180,7 +180,7 @@ write_lua_rules_file() {
 	cat > "$tmp" <<'EOF'
 -- Managed by whsprflow-arch. Only the real Flow Hub is affected.
 hl.window_rule({
-	match = { class = "^wispr-flow$", title = "^(Flow )?Hub$" },
+	match = { class = "^wispr-flow$", title = "^((Flow )?Hub|Wispr Flow)$" },
 	float = true,
 	center = true,
 	size = { 1350, 850 },
@@ -228,11 +228,11 @@ EOF
 				tmp="$(mktemp "${hypr_rules}.XXXXXX")"
 				cat > "$tmp" <<EOF
 $rules_owner
-windowrule = float on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
-windowrule = center on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
-windowrule = size 1350 850, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
-windowrule = persistent_size on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
-windowrule = no_shortcuts_inhibit on, match:class ^wispr-flow$, match:title ^(Flow )?Hub$
+windowrule = float on, match:class ^wispr-flow$, match:title ^((Flow )?Hub|Wispr Flow)$
+windowrule = center on, match:class ^wispr-flow$, match:title ^((Flow )?Hub|Wispr Flow)$
+windowrule = size 1350 850, match:class ^wispr-flow$, match:title ^((Flow )?Hub|Wispr Flow)$
+windowrule = persistent_size on, match:class ^wispr-flow$, match:title ^((Flow )?Hub|Wispr Flow)$
+windowrule = no_shortcuts_inhibit on, match:class ^wispr-flow$, match:title ^((Flow )?Hub|Wispr Flow)$
 windowrule = float on, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$
 windowrule = no_focus on, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$
 windowrule = no_follow_mouse on, match:class ^wispr-flow$, match:title ^(Status|Flow Status Indicator)$

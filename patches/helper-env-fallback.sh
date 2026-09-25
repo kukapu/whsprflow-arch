@@ -6,8 +6,8 @@
 # con N=(e=a.app.isPackaged)=>({sentryDSN:f.kL,...}).
 # El script helper-env.sh del port (upstream) ancla en `env:{` y falla con
 # "expected exactly 1 helper-spawn env anchor, found 0". Este fallback ancla
-# en el nucleo estable `sentryDSN:f.kL,...,sentryLocalDebug:...` (1 ocurrencia
-# tanto en 1.6.447 como en 1.6.774, solo literales no minificados) e inserta el
+# en el nucleo `sentryDSN:<mod>.kL,...,sentryLocalDebug:...` (1 ocurrencia
+# en 1.6.447, 1.6.774 y 1.6.957), deriva el identificador del modulo e inserta el
 # mismo spread `...process.env` con el mismo marcador WISPR_LINUX_HELPER_ENV,
 # de modo que el helper Linux herede WAYLAND_DISPLAY/DISPLAY/XDG_RUNTIME_DIR.
 # Uso: helper-env-fallback.sh <.webpack/main/index.js>
@@ -30,23 +30,26 @@ fi
 
 python3 - "$BUNDLE" "$ENV_MARKER" <<'PY'
 import io
+import re
 import sys
 
 path, marker = sys.argv[1], sys.argv[2]
 with io.open(path, "r", encoding="utf-8", errors="surrogateescape") as f:
     data = f.read()
 
-# Nucleo estable de telemetria dentro de N(): solo strings/propiedades que el
-# minificador conserva. Verificado count==1 en 1.6.447 y 1.6.774.
-anchor = (
-    'sentryDSN:f.kL,environment:f.M0,segmentWriteKey:f.yj,'
-    'postHogProjectKey:f.jd,sentryLocalDebug:f.iP?"true":""'
+# Derivar el modulo: f en 1.6.774, b en 1.6.957. No fijar su nombre minificado.
+pattern = re.compile(
+    r'sentryDSN:(?P<module>[\w$]+)\.kL,environment:(?P=module)\.M0,'
+    r'segmentWriteKey:(?P=module)\.yj,postHogProjectKey:(?P=module)\.jd,'
+    r'sentryLocalDebug:(?P=module)\.iP\?"true":""'
 )
-n = data.count(anchor)
+matches = list(pattern.finditer(data))
+n = len(matches)
 if n != 1:
     sys.exit(f"ERROR: expected exactly 1 helper-env N anchor, found {n}.")
 
-at = data.find(anchor)
+anchor = matches[0].group(0)
+at = matches[0].start()
 window = data[max(0, at - 200):at + len(anchor) + 50]
 if marker in window:
     sys.exit(0)

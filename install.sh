@@ -3,13 +3,13 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly APP_VERSION='1.6.774'
+readonly APP_VERSION='1.6.957'
 readonly ELECTRON_VERSION='42.3.0'
 readonly PORT_COMMIT='6fb43cd809f8319a9e05da4b4e7a2d3264c126ab'
 readonly HELPER_COMMIT='fa93fcf31d9ee7a9591a8dce1852f815d1b0dec5'
 readonly NUPKG_NAME="WisprFlow-${APP_VERSION}-full.nupkg"
 readonly NUPKG_URL="https://dl.wisprflow.com/wispr-flow/win32/x64/${NUPKG_NAME}"
-readonly NUPKG_SHA256='36a33ee649c834d617cc5c90c06d618ffda4062287ce8c064e4837448e4bdddc'
+readonly NUPKG_SHA256='1b6875eb829283bae219c4e99089bee06485842d89a4a389cdc5420cf6498e28'
 readonly ELECTRON_NAME="electron-v${ELECTRON_VERSION}-linux-x64.zip"
 readonly ELECTRON_URL="https://github.com/electron/electron/releases/download/v${ELECTRON_VERSION}/${ELECTRON_NAME}"
 readonly ELECTRON_SHA256='487a667ca6a734b958c16cff1df74d9d44d2c18a6cccdb4dd51f6301a356c420'

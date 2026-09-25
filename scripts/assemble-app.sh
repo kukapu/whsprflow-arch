@@ -200,7 +200,9 @@ hub_renderer="$work_dir/app/.webpack/renderer/hub/index.js"
 [[ -f $main_bundle ]] || die 'app.asar no contiene el bundle principal esperado.'
 [[ -f $hub_renderer ]] || die 'app.asar no contiene el renderer de Flow Hub esperado.'
 
-bash "$patch_dir/helper-resolver.sh" "$main_bundle"
+if ! bash "$patch_dir/helper-resolver.sh" "$main_bundle"; then
+	bash "$script_dir/patches/helper-resolver-fallback.sh" "$main_bundle"
+fi
 if ! bash "$patch_dir/helper-env.sh" "$main_bundle"; then
 	# Wispr >= 1.6.774 factored the helper env into N(): the upstream
 	# anchor `env:{` no longer exists. Apply the nucleus-anchored fallback
@@ -208,7 +210,9 @@ if ! bash "$patch_dir/helper-env.sh" "$main_bundle"; then
 	bash "$script_dir/patches/helper-env-fallback.sh" "$main_bundle"
 fi
 bash "$patch_dir/mac-gates.sh" "$main_bundle"
-bash "$patch_dir/linux-window-frame.sh" "$main_bundle"
+if ! bash "$patch_dir/linux-window-frame.sh" "$main_bundle"; then
+	bash "$script_dir/patches/window-frame-fallback.sh" "$main_bundle"
+fi
 bash "$patch_dir/linux-deeplink.sh" "$main_bundle"
 bash "$patch_dir/linux-renderer-chrome.sh" "$hub_renderer"
 

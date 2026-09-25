@@ -9,9 +9,13 @@ trap 'rm -rf "$tmp"' EXIT
 for script in "$root/install.sh" "$root/uninstall.sh" "$root/bin/wispr-flow" \
 	"$root/bin/wispr-flow-configure" "$root/patches/linux-runtime-fixes.sh" \
 	"$root/patches/helper-env-fallback.sh" \
+	"$root/patches/helper-resolver-fallback.sh" \
+	"$root/patches/window-frame-fallback.sh" \
 	"$root/scripts/assemble-app.sh" "$root/scripts/build-helper.sh"; do
 	bash -n "$script"
 done
+
+python3 "$root/tests/patch-fallbacks.py"
 
 aur_dir="$root/packaging/aur"
 pkgbuild="$aur_dir/PKGBUILD"
@@ -62,7 +66,8 @@ grep -qF '"$srcdir/' <<< "$pkg_functions"
 ! grep -qF '/usr/local' "$pkgbuild"
 ! grep -qF '/home/' "$pkgbuild"
 placeholder='TO_BE_''PINNED'
-if grep -R -I -q --exclude-dir=.git --exclude='wispr-flow-linux-helper-x86_64' \
+if grep -r -I -q --exclude-dir=.git --exclude-dir=src --exclude-dir=pkg \
+		--exclude='wispr-flow-linux-helper-x86_64' \
 		-- "$placeholder" "$root"; then
 	printf 'ERROR: quedan placeholders del pin AUR.\n' >&2
 	exit 1
@@ -196,7 +201,7 @@ printf '# test autostart config\n' > "$tmp/config/hypr/autostart.conf"
 HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
 	"$root/bin/wispr-flow-configure" hyprland-rules on
 grep -qxF '# >>> whsprflow-arch rules >>>' "$tmp/config/hypr/hyprland.conf"
-grep -qF 'match:class ^wispr-flow$, match:title ^(Flow )?Hub$' "$tmp/config/hypr/wispr-flow.conf"
+grep -qF 'match:class ^wispr-flow$, match:title ^((Flow )?Hub|Wispr Flow)$' "$tmp/config/hypr/wispr-flow.conf"
 
 HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" \
 	"$root/bin/wispr-flow-configure" autostart on
@@ -256,7 +261,7 @@ HOME="$tmp/home" XDG_CONFIG_HOME="$tmp/config" WISPR_FLOW_SKIP_HYPR_RELOAD=1 \
 	"$root/bin/wispr-flow-configure" hyprland-rules on
 grep -qxF -- '-- >>> whsprflow-arch rules >>>' "$tmp/config/hypr/hyprland.lua"
 grep -qF "dofile(\"$tmp/config/hypr/wispr-flow.lua\")" "$tmp/config/hypr/hyprland.lua"
-grep -qF 'match = { class = "^wispr-flow$", title = "^(Flow )?Hub$" }' \
+grep -qF 'match = { class = "^wispr-flow$", title = "^((Flow )?Hub|Wispr Flow)$" }' \
 	"$tmp/config/hypr/wispr-flow.lua"
 grep -qF 'size = { 1350, 850 }' "$tmp/config/hypr/wispr-flow.lua"
 grep -qF 'border_size = 0' "$tmp/config/hypr/wispr-flow.lua"

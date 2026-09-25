@@ -1,6 +1,6 @@
 # Wispr Flow en Arch Linux / Hyprland
 
-Este proyecto construye **Wispr Flow 1.6.774** para Linux a partir del paquete
+Este proyecto construye **Wispr Flow 1.6.957** para Linux a partir del paquete
 oficial de Windows. No es una reimplementacion de Whisper ni usa Wine: conserva
 el cliente Electron, el login, la cuenta Pro y los servicios cloud de Wispr, y
 sustituye solo la integracion Win32 por un helper Linux de codigo abierto.
@@ -33,6 +33,11 @@ integracion automatica soporta tanto `hyprland.conf` como la entrada Lua
 `hyprland.lua` de Hyprland >= 0.55 (Omarchy 4).
 
 ### Ruta 2: AUR
+
+La receta publicada en `packaging/aur/` corresponde a **1.6.774-1**. La
+actualizacion **1.6.957** se construye de momento desde este repositorio con
+`install.sh`; publicar la nueva receta AUR requiere primero publicar y fijar
+el commit de soporte que contiene los nuevos parches.
 
 El paquete `wispr-flow-hyprland` esta publicado en
 <https://aur.archlinux.org/packages/wispr-flow-hyprland>. En una instalacion
@@ -89,6 +94,8 @@ whsprflow-arch/
 |   |   |-- terminal-paste.patch
 |   |   `-- uinput.rs
 |   |-- helper-env-fallback.sh
+|   |-- helper-resolver-fallback.sh
+|   |-- window-frame-fallback.sh
 |   `-- linux-runtime-fixes.sh
 |-- scripts/
 |   |-- assemble-app.sh
@@ -157,7 +164,7 @@ pedira `sudo` solamente para las operaciones que lo necesitan.
 
    - instala las dependencias de Arch, incluidos `asar`, XWayland y
      `wl-clipboard`;
-   - descarga el cliente oficial de Wispr Flow `1.6.774`;
+   - descarga el cliente oficial de Wispr Flow `1.6.957`;
    - descarga Electron Linux `42.3.0`;
    - usa el helper Linux abierto `0.1.2`, parcheado desde el commit fijado;
    - descarga el modulo SQLite Linux compatible;
@@ -199,7 +206,7 @@ paquetes JavaScript.
 
    ```text
    ==> Instalacion terminada
-   Version:      1.6.774
+   Version:      1.6.957
    Tipo:         system
    Ejecutable:   /usr/local/bin/wispr-flow
    ```
@@ -291,8 +298,9 @@ sonidos de Flow. Al pegar, el helper usa `Ctrl+V` normalmente y
 `Ctrl+Shift+V` cuando la ventana activa de Hyprland es un terminal conocido,
 incluido Warp.
 
-Las reglas gestionadas solo coinciden con clase `wispr-flow` y titulo `Hub` o
-`Flow Hub`. No afectan las ventanas Status, Context Menu ni Scratchpad. En
+Las reglas gestionadas solo coinciden con clase `wispr-flow` y titulo `Hub`,
+`Flow Hub` o `Wispr Flow` (desde 1.6.957). No afectan las ventanas Status,
+Context Menu ni Scratchpad. En
 sesiones Lua se guardan en `~/.config/hypr/wispr-flow.lua` y se cargan con un
 bloque `dofile` gestionado en `hyprland.lua`; en sesiones `.conf` siguen en
 `~/.config/hypr/wispr-flow.conf`. El configurer nunca sobrescribe un archivo
@@ -393,11 +401,32 @@ estar activa en procesos ya iniciados.
 
 ## Verificacion
 
+La actualizacion 1.6.957 adapta el resolver extraido del helper, el entorno
+del proceso, la ventana de reuniones y los puntos de insercion del indicador
+de dictado (ahora de 614 x 512 antes de aplicar escala). Conserva Electron
+42.3.0 y el helper Linux fijado. El SHA-256 del NUPKG oficial es
+`1b6875eb829283bae219c4e99089bee06485842d89a4a389cdc5420cf6498e28`.
+
+Verificacion de 1.6.957 realizada el 25 de septiembre de 2026:
+
+- ensamblado completo y comprobacion de los marcadores Linux del ASAR;
+- carga del modulo SQLite 3.44.2 con Electron 42.3.0;
+- `tests/smoke.sh` y cinco pruebas de regresion de los fallbacks y deteccion del Hub;
+- arranque Wayland durante 25 segundos con perfil temporal: 157 migraciones,
+  helper listo, backend Wayland y contexto de audio en estado `running`;
+- cierre con SIGTERM al proceso principal, codigo de salida 0.
+
+La instalacion del sistema se verifico con `wispr-flow --doctor`, recarga de
+Hyprland sin errores, mostrar/ocultar Hub, arranque en segundo plano y cierre
+sin procesos ni teclado virtual sobrantes. El usuario confirmo el funcionamiento
+del dictado con su cuenta. Sigue pendiente la limitacion conocida de interaccion
+con los botones del indicador transitorio en Wayland nativo.
+
 ```bash
 ./tests/smoke.sh
 ```
 
-La prueba real realizada durante el desarrollo confirmo: Electron bajo
+La prueba real historica realizada con 1.6.774 confirmo: Electron bajo
 XWayland con Status transitorio,
 version `1.6.774`, ASAR extraible sin referencias Windows rotas, helper Linux
 reproducible, una sola instancia, Hub oculto en el workspace especial y cierre

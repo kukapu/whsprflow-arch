@@ -135,7 +135,9 @@ hub_address() {
 		[.[] | select(
 			(.class // "") == "wispr-flow" and
 			((.title // "") == "Hub" or (.title // "") == "Flow Hub" or
-			 (.initialTitle // "") == "Hub" or (.initialTitle // "") == "Flow Hub")
+			 (.title // "") == "Wispr Flow" or
+			 (.initialTitle // "") == "Hub" or (.initialTitle // "") == "Flow Hub" or
+			 (.initialTitle // "") == "Wispr Flow")
 		)] | .[0].address // empty
 	'
 }
